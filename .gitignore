@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Data (keep directory, ignore contents)
+data/*
+!data/.gitkeep
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+.letta/
