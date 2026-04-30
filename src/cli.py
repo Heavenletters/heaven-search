@@ -46,18 +46,26 @@ def cmd_search(args):
         title = doc.get("title") or f"#{doc['id']}"
         score = doc.get("_score", "?")
         source = doc.get("_source", "?")
+        
+        # Grab metadata fields
+        meta = doc.get("metadata", {})
+        pub_num = meta.get("publish_number", "Unknown")
+        permalink = meta.get("permalink", "")
 
-        print(f"  [{i}] {title}")
+        print(f"  [{i}] Title: {title} | Publish Number: {pub_num}")
         print(f"      score: {score}  |  source: {source}")
-        if doc.get("external_id"):
-            print(f"      external_id: {doc['external_id']}")
+        if permalink:
+            print(f"      url: https://heavenletters.org/{permalink}")
 
-        # Show first 200 chars of content
-        content = doc["content"]
-        preview = content[:200].replace("\n", " ").strip()
-        if len(content) > 200:
-            preview += "…"
-        print(f"      {preview}")
+        # Show the smart excerpt if it exists, otherwise fall back to content preview
+        excerpt = doc.get("_excerpt")
+        if not excerpt:
+            content = doc["content"]
+            excerpt = content[:200].replace("\n", " ").strip()
+            if len(content) > 200:
+                excerpt += "…"
+                
+        print(f"      {excerpt}")
         print()
 
     store.close()

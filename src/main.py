@@ -73,6 +73,11 @@ class SearchResult(BaseModel):
     metadata: dict = {}
     score: float
     source: str  # "semantic", "keyword", or "hybrid"
+    # Heavenletter-specific fields (extracted from metadata for convenience)
+    permalink: Optional[str] = None
+    publish_number: Optional[int] = None
+    published_date: Optional[str] = None
+    excerpt: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
@@ -244,14 +249,26 @@ def health():
 # Attach helper to clean up result dicts for Pydantic serialization
 @staticmethod
 def _scrub(result: dict) -> SearchResult:
+    meta = result.get("metadata", {})
+    # publish_number might be stored as int or string in metadata
+    pn = meta.get("publish_number")
+    if pn is not None:
+        try:
+            pn = int(pn)
+        except (ValueError, TypeError):
+            pn = None
     return SearchResult(
         id=result["id"],
         external_id=result.get("external_id"),
         title=result.get("title"),
         content=result["content"],
-        metadata=result.get("metadata", {}),
+        metadata=meta,
         score=result.get("_score", 0.0),
         source=result.get("_source", "unknown"),
+        permalink=meta.get("permalink"),
+        publish_number=pn,
+        published_date=meta.get("published_date"),
+        excerpt=result.get("_excerpt"),
     )
 
 

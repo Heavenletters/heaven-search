@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
+# Suppress Hugging Face hub warnings since we only need local inference after ingestion
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 

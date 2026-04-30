@@ -2,10 +2,77 @@
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 from .embedder import embed_query
 from .store import DocStore
+
+
+# ── Excerpt generation ──────────────────────────────────────────────
+
+def generate_excerpt(content: str, query: str, max_length: int = 300) -> str:
+    """Extract the most relevant passage from content given a query.
+
+    Strategy:
+      1. Split content into sentences.
+      2. Score each sentence by overlap with query terms.
+      3. Return the best sentence ± surrounding context, up to max_length.
+      4. Fall back to the first max_length chars if no good match.
+    """
+    # Normalise and tokenise query for matching
+    query_terms = set(re.findall(r"\w+", query.lower()))
+    if not query_terms:
+        return _truncate(content, max_length)
+
+    # Split into sentences (handles \r\n and \n)
+    sentences = re.split(r"(?<=[.!?])\s+|\r?\n", content)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if not sentences:
+        return _truncate(content, max_length)
+
+    # Score each sentence
+    best_idx = 0
+    best_score = -1
+    for i, sent in enumerate(sentences):
+        sent_terms = set(re.findall(r"\w+", sent.lower()))
+        overlap = len(query_terms & sent_terms)
+        if overlap > best_score:
+            best_score = overlap
+            best_idx = i
+
+    # If no overlap at all, use the beginning
+    if best_score == 0:
+        return _truncate(content, max_length)
+
+    # Build excerpt from best sentence ± neighbours
+    excerpt_parts: list[str] = []
+    total_len = 0
+    start = max(0, best_idx - 1)
+
+    for i in range(start, len(sentences)):
+        if total_len + len(sentences[i]) > max_length:
+            break
+        excerpt_parts.append(sentences[i])
+        total_len += len(sentences[i]) + 1
+        # Stop after including the best sentence + 1 after
+        if i > best_idx:
+            break
+
+    excerpt = " ".join(excerpt_parts)
+    if len(content) > len(excerpt) + 10:
+        excerpt += "…"
+    return excerpt
+
+
+def _truncate(text: str, max_length: int) -> str:
+    """Truncate text to max_length, adding ellipsis if needed."""
+    text = text.replace("\r\n", " ").replace("\n", " ").strip()
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip() + "…"
 
 
 def semantic_search(
@@ -42,6 +109,7 @@ def semantic_search(
         if doc:
             doc["_score"] = round(score, 4)
             doc["_source"] = "semantic"
+            doc["_excerpt"] = generate_excerpt(doc["content"], query)
             results.append(doc)
 
     return results
@@ -58,6 +126,7 @@ def keyword_search(
         r["_source"] = "keyword"
         # Normalize rank to a pseudo-score (higher = better)
         r["_score"] = round(1.0 / (abs(r.get("_rank", 1)) + 1), 4)
+        r["_excerpt"] = generate_excerpt(r["content"], query)
     return results
 
 

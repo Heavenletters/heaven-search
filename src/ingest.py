@@ -44,15 +44,16 @@ def ingest_batch(store: DocStore, documents: list[dict], batch_size: int = 32):
     metadata_list = []
 
     for doc in documents:
-        # content is the only required field
-        content = doc.get("content", doc.get("text", ""))
+        # content is the only required field — supports "content", "text", or "body"
+        content = doc.get("content", doc.get("text", doc.get("body", "")))
         if not content:
-            print(f"  ⚠ skipping document with empty content: {doc.get('id', '?')}")
+            print(f"  ⚠ skipping document with empty content: {doc.get('id', doc.get('nid', '?'))}")
             continue
         contents.append(content)
 
         # Extract known fields, dump rest into metadata
-        ext_id = doc.get("id", None)
+        # external ID: prefer "id", fall back to "nid" or "publish_number"
+        ext_id = doc.get("id", doc.get("nid", doc.get("publish_number", None)))
         title = doc.get("title", None)
         meta = {k: v for k, v in doc.items() if k not in ("id", "title", "content", "text")}
 
