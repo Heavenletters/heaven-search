@@ -38,22 +38,39 @@ class Embedder(ABC):
 # ── Vertex AI (cloud) ───────────────────────────────────────────────
 
 class VertexEmbedder(Embedder):
-    """Google text-embedding-004 via Generative Language API.
+    """Google text-embedding-004 via Vertex AI predict endpoint.
 
-    Uses API key auth — no OAuth or service account needed.
-    Batch endpoint supports up to 100 texts per request.
+    Uses API key auth with x-goog-api-key header.
+    Requires VERTEX_PROJECT and VERTEX_API_KEY env vars.
+    Batch endpoint supports up to 250 instances per request.
     """
 
     dim = 768
+    MODEL = "text-embedding-004"
 
-    def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.environ.get("VERTEX_API_KEY", "")
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004"
-        self.max_batch = 100  # API limit per batchEmbedContents call
+    def __init__(
+        self,
+        api_key: str | None = None,
+        project: str | None = None,
+        location: str | None = None,
+    ):
+        self.api_key = api_key or os.environ.get("VERTEX_API_KEY") or os.environ.get("VERTEX_AI_API_KEY", "")
+        self.project = project or os.environ.get("VERTEX_PROJECT", "")
+        self.location = location or os.environ.get("VERTEX_LOCATION", "us-central1")
+        self.max_batch = 250  # Vertex AI limit per predict call
 
     @property
     def available(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key) and bool(self.project)
+
+    @property
+    def _endpoint(self) -> str:
+        return (
+            f"https://{self.location}-aiplatform.googleapis.com"
+            f"/v1/projects/{self.project}"
+            f"/locations/{self.location}"
+            f"/publishers/google/models/{self.MODEL}:predict"
+        )
 
     def embed_texts(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
         import urllib.request
@@ -61,6 +78,8 @@ class VertexEmbedder(Embedder):
 
         if not self.api_key:
             raise RuntimeError("VERTEX_API_KEY not set")
+        if not self.project:
+            raise RuntimeError("VERTEX_PROJECT not set")
 
         all_embeddings: list[np.ndarray] = []
         batch_size = min(batch_size, self.max_batch)
@@ -76,21 +95,16 @@ class VertexEmbedder(Embedder):
         import urllib.request
         import json
 
-        requests_payload = [
-            {
-                "model": "models/text-embedding-004",
-                "content": {"parts": [{"text": t}]},
-            }
-            for t in texts
-        ]
-
-        body = json.dumps({"requests": requests_payload}).encode("utf-8")
-        url = f"{self.base_url}:batchEmbedContents?key={self.api_key}"
+        instances = [{"content": t} for t in texts]
+        body = json.dumps({"instances": instances}).encode("utf-8")
 
         req = urllib.request.Request(
-            url,
+            self._endpoint,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
             method="POST",
         )
 
@@ -103,9 +117,15 @@ class VertexEmbedder(Embedder):
         if "error" in data:
             raise RuntimeError(f"Vertex API error: {data['error']}")
 
+        predictions = data.get("predictions", [])
+        if len(predictions) != len(texts):
+            raise RuntimeError(
+                f"Vertex returned {len(predictions)} predictions for {len(texts)} texts"
+            )
+
         embeddings = []
-        for entry in data.get("embeddings", []):
-            values = entry.get("values", [])
+        for pred in predictions:
+            values = pred.get("embeddings", {}).get("values", [])
             if not values:
                 raise RuntimeError("Vertex API returned empty embedding")
             vec = np.array(values, dtype=np.float32)
