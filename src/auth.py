@@ -28,6 +28,12 @@ API_KEY = os.environ.get("HEAVEN_API_KEY", "")
 # Admin user for web UI login
 ADMIN_USERNAME = os.environ.get("HEAVEN_ADMIN_USER", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("HEAVEN_ADMIN_PASSWORD_HASH", "")
+ADMIN_PASSWORD_FILE = os.environ.get("HEAVEN_ADMIN_PASSWORD_FILE", "")
+
+# Prefer file-based password hash (avoids docker-compose $ escaping)
+if ADMIN_PASSWORD_FILE and os.path.isfile(ADMIN_PASSWORD_FILE):
+    with open(ADMIN_PASSWORD_FILE) as f:
+        ADMIN_PASSWORD_HASH = f.read().strip()
 
 security_scheme = HTTPBearer(auto_error=False)
 

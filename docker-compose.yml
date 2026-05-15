@@ -7,12 +7,16 @@ services:
     volumes:
       # Persist the database and embeddings between restarts
       - ./data:/app/data
+      # Password file — avoids docker-compose $ escaping issues
+      - ./admin_password_hash:/run/secrets/admin_password_hash:ro
     environment:
       # Auth — set these!
       - HEAVEN_API_KEY=${HEAVEN_API_KEY:-}
       - HEAVEN_JWT_SECRET=${HEAVEN_JWT_SECRET:-change-me-in-production}
       - HEAVEN_ADMIN_USER=${HEAVEN_ADMIN_USER:-admin}
       - HEAVEN_ADMIN_PASSWORD_HASH=${HEAVEN_ADMIN_PASSWORD_HASH:-}
+      # Or mount a password file to avoid $ escaping in docker-compose
+      - HEAVEN_ADMIN_PASSWORD_FILE=/run/secrets/admin_password_hash
       # Embedding backend
       - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-auto}
       - VERTEX_API_KEY=${VERTEX_API_KEY:-${VERTEX_AI_API_KEY:-}}
