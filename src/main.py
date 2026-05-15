@@ -440,6 +440,7 @@ def _build_results_html(results: list[dict], backend: str) -> str:
 
 
 def _build_analysis_html(analysis: str, sources: list[dict]) -> str:
+    """Build analysis section with sources as HTML, raw markdown for JS rendering."""
     if not analysis:
         return ""
     parts = ['<div id="analyze-result">', '<h3>Analysis</h3>']
@@ -455,27 +456,11 @@ def _build_analysis_html(analysis: str, sources: list[dict]) -> str:
                 f'Heavenletter #{num}: {title}</a></span>'
             )
         parts.append('<div class="source-list">Based on: ' + ", ".join(src_links) + "</div>")
-    # Wrap paragraphs for markdown-like text (basic rendering even without JS)
-    for line in analysis.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("###"):
-            parts.append(f"<h4>{_html_escape(line[3:].strip())}</h4>")
-        elif line.startswith("##"):
-            parts.append(f"<h3>{_html_escape(line[2:].strip())}</h3>")
-        elif line.startswith("#"):
-            parts.append(f"<h3>{_html_escape(line[1:].strip())}</h3>")
-        elif line.startswith("- ") or line.startswith("* "):
-            parts.append(f"<li>{_html_escape(line[2:])}</li>")
-        elif line.startswith("> "):
-            parts.append(f"<blockquote>{_html_escape(line[2:])}</blockquote>")
-        else:
-            # Bold markers
-            line = _html_escape(line)
-            line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
-            parts.append(f"<p>{line}</p>")
-    parts.append("</div>")
+    # Embed raw markdown for client-side rendering with marked.js
+    escaped_analysis = analysis.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+    parts.append(f'<div id="analysis-content"></div>')
+    parts.append(f'<script type="text/markdown" id="analysis-raw">{escaped_analysis}</script>')
+    parts.append('</div>')
     return "\n".join(parts)
 
 
@@ -488,6 +473,7 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Lexend:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   :root {{
@@ -596,6 +582,7 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
 <div class="footer">
   <a href="/">Search Heavenletters</a>
 </div>
+<script>const raw=document.getElementById('analysis-raw');if(raw){{document.getElementById('analysis-content').innerHTML=marked.parse(raw.textContent);raw.remove();}}</script>
 </body>
 </html>'''
 
