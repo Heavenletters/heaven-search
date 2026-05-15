@@ -155,6 +155,7 @@ class AnalyzeResponse(BaseModel):
     documents_retrieved: int
     tokens_used: Optional[int] = None
     analysis: str
+    sources: list[dict] = []
 
 
 # ── Routes ──────────────────────────────────────────────────────────
@@ -273,9 +274,18 @@ def api_analyze(
         )
 
     context_parts = []
+    sources = []
     for i, doc in enumerate(results, 1):
-        title = doc.get("title") or f"Heavenletter #{doc.get('external_id', doc['id'])}"
-        context_parts.append(f"--- Document {i}: {title} ---\n{doc['content']}\n")
+        pub_num = doc.get("metadata", {}).get("publish_number", "Unknown")
+        title = doc.get("title") or f"Heavenletter"
+        permalink = doc.get("metadata", {}).get("permalink", "")
+        sources.append({
+            "publish_number": pub_num,
+            "title": title,
+            "permalink": permalink,
+        })
+        label = f"Heavenletter #{pub_num}: {title}"
+        context_parts.append(f"--- {label} ---\n{doc['content']}\n")
 
     context = "\n".join(context_parts)
 
@@ -312,6 +322,7 @@ def api_analyze(
         documents_retrieved=len(results),
         tokens_used=usage.get("total_tokens"),
         analysis=choice["message"]["content"],
+        sources=sources,
     )
 
 

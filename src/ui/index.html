@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Heavenletters Search</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -240,16 +241,54 @@
     padding: 1.25rem 1.5rem;
     border-radius: 0 6px 6px 0;
     font-size: 0.9rem;
-    line-height: 1.6;
+    line-height: 1.65;
     display: none;
   }
 
   #analyze-result h3 {
     font-weight: 400;
     color: #8b7355;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 0.95rem;
   }
+
+  #analyze-result h4 {
+    font-weight: 500;
+    margin: 1rem 0 0.35rem;
+    font-size: 0.9rem;
+  }
+
+  #analyze-result p { margin-bottom: 0.5rem; }
+  #analyze-result ul, #analyze-result ol { margin: 0.25rem 0 0.5rem 1.5rem; }
+  #analyze-result li { margin-bottom: 0.2rem; }
+  #analyze-result strong { color: #5a4a3a; }
+  #analyze-result em { color: #6a5a4a; }
+  #analyze-result blockquote {
+    border-left: 2px solid #d5c8b5;
+    padding-left: 0.75rem;
+    color: #777;
+    margin: 0.5rem 0;
+    font-style: italic;
+  }
+
+  .source-list {
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e8e0d5;
+  }
+
+  .source-item {
+    font-size: 0.8rem;
+    color: #8b7355;
+    margin-bottom: 0.2rem;
+  }
+
+  .source-item a {
+    color: #8b7355;
+    text-decoration: none;
+  }
+
+  .source-item a:hover { text-decoration: underline; }
 
   /* ── Logout ─────────────────────────────────────────── */
   .logout {
@@ -490,9 +529,29 @@ async function doAnalyze(query, topK) {
       throw new Error(d.detail || 'Analysis failed');
     }
     const d = await r.json();
-    el.innerHTML = '<h3>Analysis</h3>' + 
-      d.analysis.split('\n').filter(l => l.trim()).map(l => '<p>' + esc(l) + '</p>').join('') +
-      (d.tokens_used ? '<div class="result-meta"><span>' + d.tokens_used + ' tokens</span></div>' : '');
+
+    let html = '<h3>Analysis</h3>';
+
+    // Source documents
+    if (d.sources && d.sources.length > 0) {
+      html += '<div class="source-list">Based on: ';
+      html += d.sources.map(s => {
+        const url = s.permalink ? 'https://heavenletters.org/' + s.permalink : '#';
+        return '<span class="source-item"><a href="' + url + '" target="_blank">Heavenletter #' + 
+          esc(String(s.publish_number)) + ': ' + esc(s.title) + '</a></span>';
+      }).join(', ');
+      html += '</div>';
+    }
+
+    // Render markdown
+    const analysisHtml = marked.parse(d.analysis);
+    html += analysisHtml;
+
+    if (d.tokens_used) {
+      html += '<div class="result-meta"><span>' + d.tokens_used + ' tokens</span></div>';
+    }
+
+    el.innerHTML = html;
   } catch(e) {
     el.innerHTML = '<h3>Analysis</h3><p style="color:#c44">' + e.message + '</p>';
   }
