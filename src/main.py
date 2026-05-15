@@ -485,80 +485,95 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Heavenletters: {query}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Lexend:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  :root {{
+    --cream: #f9f0d9; --white: #ffffff; --charcoal: #403f3e;
+    --ab-standard: #2e82f5; --ab-dark: #084eaf; --ab-light: #d8e8fd;
+    --mb-standard: #ED2960; --mb-dark: #bb1141; --mb-light: #f8b4c7;
+    --bl-standard: #FDE80F; --bl-light: #fef9c2; --beige: #b7b2a3;
+  }}
   body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #f5f0eb; color: #2d2d2d; min-height: 100vh;
+    font-family: 'Lexend', sans-serif;
+    background: var(--cream); color: var(--charcoal);
+    font-size: 1.125rem; line-height: 1.75; min-height: 100vh;
     display: flex; flex-direction: column; align-items: center;
   }}
+  h1, h2, h3, h4 {{ font-family: 'EB Garamond', serif; }}
   header {{
-    width: 100%; padding: 2rem 1rem 0; text-align: center;
+    width: 100%; padding: 3rem 1.5rem 0; text-align: center;
   }}
   header h1 {{
-    font-size: 1.5rem; font-weight: 300; letter-spacing: 0.04em; color: #8b7355;
+    font-size: 2rem; font-weight: 600; letter-spacing: 0.02em; color: var(--mb-standard);
   }}
-  header p {{ font-size: 0.8rem; color: #a89880; margin-top: 0.25rem; }}
+  header p {{ font-size: 0.95rem; color: var(--charcoal); opacity: 0.6; margin-top: 0.35rem; }}
   main {{
-    width: 100%; max-width: 720px; padding: 1.5rem 1rem 3rem;
+    width: 100%; max-width: 760px; padding: 2rem 1.5rem 4rem;
   }}
   .query-display {{
-    background: white; border-radius: 6px; padding: 1rem 1.5rem;
-    margin-bottom: 1.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    background: var(--white); border: 1px solid var(--beige);
+    border-radius: 0.6rem; padding: 1.5rem 1.75rem;
+    margin-bottom: 2rem;
   }}
-  .query-display .q {{ font-size: 1.1rem; color: #5a4a3a; }}
-  .query-display .meta {{ font-size: 0.75rem; color: #aaa; margin-top: 0.35rem; }}
+  .query-display .q {{ font-family: 'EB Garamond', serif; font-size: 1.35rem; color: var(--charcoal); }}
+  .query-display .meta {{ font-size: 0.85rem; color: var(--beige); margin-top: 0.5rem; }}
   .result {{
-    background: white; border-radius: 6px; padding: 1.25rem 1.5rem;
-    margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    background: var(--white); border: 1px solid var(--beige);
+    border-radius: 0.6rem; padding: 1.5rem 1.75rem; margin-bottom: 1rem;
   }}
   .result-header {{
     display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.6rem; gap: 1rem;
   }}
-  .result-title {{ font-size: 1.05rem; font-weight: 500; }}
-  .result-title a {{ color: #5a4a3a; text-decoration: none; }}
-  .result-title a:hover {{ text-decoration: underline; }}
-  .result-number {{ font-size: 0.8rem; color: #aaa; white-space: nowrap; }}
-  .result-excerpt {{
-    font-size: 0.9rem; line-height: 1.55; color: #555;
-  }}
+  .result-title {{ font-family: 'EB Garamond', serif; font-size: 1.2rem; font-weight: 600; }}
+  .result-title a {{ color: var(--charcoal); text-decoration: none; }}
+  .result-title a:hover {{ color: var(--mb-standard); }}
+  .result-number {{ font-size: 0.9rem; color: var(--beige); white-space: nowrap; }}
+  .result-excerpt {{ font-size: 1rem; line-height: 1.7; opacity: 0.85; }}
   .result-meta {{
-    display: flex; gap: 1rem; margin-top: 0.5rem;
-    font-size: 0.75rem; color: #bbb;
+    display: flex; gap: 1rem; margin-top: 0.75rem;
+    font-size: 0.8rem; color: var(--beige);
   }}
   .result-meta span {{
-    background: #f5f0eb; padding: 0.1rem 0.4rem; border-radius: 3px;
+    background: var(--cream); padding: 0.15rem 0.5rem; border-radius: 0.3rem;
   }}
   #analyze-result {{
-    margin-top: 2rem; background: #faf8f5;
-    border-left: 3px solid #8b7355; padding: 1.25rem 1.5rem;
-    border-radius: 0 6px 6px 0; font-size: 0.9rem; line-height: 1.65;
+    margin-top: 3rem; background: var(--white);
+    border: 1px solid var(--beige); border-left: 4px solid var(--mb-standard);
+    padding: 2rem; border-radius: 0 0.6rem 0.6rem 0;
+    font-size: 1rem; line-height: 1.75;
   }}
   #analyze-result h3 {{
-    font-weight: 400; color: #8b7355; margin-bottom: 0.75rem; font-size: 0.95rem;
+    font-family: 'EB Garamond', serif; font-size: 1.5rem; font-weight: 600;
+    color: var(--mb-standard); margin-bottom: 1rem;
   }}
   #analyze-result h4 {{
-    font-weight: 500; margin: 0.75rem 0 0.35rem; font-size: 0.9rem;
+    font-family: 'EB Garamond', serif; font-weight: 600;
+    margin: 1.25rem 0 0.5rem; font-size: 1.15rem;
   }}
-  #analyze-result p {{ margin-bottom: 0.5rem; }}
-  #analyze-result strong {{ color: #5a4a3a; }}
+  #analyze-result p {{ margin-bottom: 0.65rem; }}
+  #analyze-result strong {{ color: var(--ab-dark); font-weight: 600; }}
   #analyze-result blockquote {{
-    border-left: 2px solid #d5c8b5; padding-left: 0.75rem;
-    color: #777; margin: 0.5rem 0; font-style: italic;
+    border-left: 3px solid var(--bl-standard);
+    padding-left: 1rem; opacity: 0.75; margin: 0.75rem 0;
+    font-style: italic; font-family: 'EB Garamond', serif;
   }}
   #analyze-result li {{ margin: 0.15rem 0 0.15rem 1.5rem; }}
   .source-list {{
-    margin-bottom: 1rem; padding-bottom: 0.75rem;
-    border-bottom: 1px solid #e8e0d5; font-size: 0.8rem; color: #8b7355;
+    margin-bottom: 1.25rem; padding-bottom: 1rem;
+    border-bottom: 1px solid var(--beige); font-size: 0.95rem; opacity: 0.75;
   }}
-  .source-item a {{ color: #8b7355; text-decoration: none; }}
+  .source-item a {{ color: var(--ab-standard); text-decoration: none; }}
   .source-item a:hover {{ text-decoration: underline; }}
-  .status {{ text-align: center; color: #999; padding: 2rem 0; font-size: 0.9rem; }}
+  .status {{ text-align: center; opacity: 0.5; padding: 3rem 0; font-size: 1.05rem; }}
   .footer {{
-    text-align: center; padding: 1rem; font-size: 0.7rem; color: #ccc;
+    text-align: center; padding: 1.5rem; font-size: 0.85rem;
+    color: var(--beige); font-family: 'Lexend', sans-serif;
   }}
-  .footer a {{ color: #aaa; }}
+  .footer a {{ color: var(--ab-standard); text-decoration: none; }}
 </style>
 </head>
 <body>
