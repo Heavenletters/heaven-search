@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install PyTorch CPU-only first (saves ~2.5GB vs CUDA)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -17,9 +20,6 @@ COPY scripts/ ./scripts/
 
 # Create data directory
 RUN mkdir -p /app/data
-
-# Pre-download the local embedding model during build
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')"
 
 EXPOSE 8000
 
