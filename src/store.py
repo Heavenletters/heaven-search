@@ -162,8 +162,21 @@ class DocStore:
         row_map = {r["id"]: r for r in rows}
         return [_row_to_dict(row_map[rid]) for rid in row_ids if rid in row_map]
 
+    @staticmethod
+    def _sanitize_fts5_query(query: str) -> str:
+        """Escape FTS5 special characters so arbitrary text works as a phrase query.
+
+        FTS5 has its own mini query language. Characters like . * " ( ) :
+        can cause syntax errors. Wrapping in double quotes treats the input
+        as a literal phrase, which is what users expect from keyword search.
+        """
+        # Escape internal double quotes by doubling them (SQLite convention)
+        escaped = query.replace('"', '""')
+        return f'"{escaped}"'
+
     def keyword_search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         """FTS5 keyword search. Returns matching documents."""
+        safe_query = self._sanitize_fts5_query(query)
         rows = self.conn.execute(
             """
             SELECT d.id, d.external_id, d.title, d.content, d.metadata, d.created_at,
@@ -174,7 +187,7 @@ class DocStore:
             ORDER BY rank
             LIMIT ?
             """,
-            (query, limit),
+            (safe_query, limit),
         ).fetchall()
         results = []
         for row in rows:
