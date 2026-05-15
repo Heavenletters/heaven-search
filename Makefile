@@ -1,5 +1,11 @@
 .PHONY: install test dev build up down shell ingest ingest-vertex ingest-local password query
 
+# Load .env if it exists
+ifneq (,$(wildcard ./.env))
+    include .env
+    export
+endif
+
 # Install dependencies in a virtual environment
 install:
 	python3 -m venv venv
