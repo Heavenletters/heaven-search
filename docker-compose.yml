@@ -29,3 +29,8 @@ services:
           memory: 2G
         reservations:
           memory: 512M
+
+networks:
+  default:
+    name: docker_backend
+    external: true
