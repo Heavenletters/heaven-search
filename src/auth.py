@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 # ── Configuration ───────────────────────────────────────────────────
@@ -30,7 +29,6 @@ API_KEY = os.environ.get("HEAVEN_API_KEY", "")
 ADMIN_USERNAME = os.environ.get("HEAVEN_ADMIN_USER", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("HEAVEN_ADMIN_PASSWORD_HASH", "")
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security_scheme = HTTPBearer(auto_error=False)
 
 
@@ -72,15 +70,14 @@ async def require_auth(
 
     token: str | None = None
 
-    # Option 1: Authorization header
     if credentials:
         token = credentials.credentials
 
-    # Option 2: Static API key (check if token matches API_KEY directly)
+    # Static API key
     if token and API_KEY and token == API_KEY:
         return "api_key"
 
-    # Option 3: JWT token
+    # JWT token
     if token:
         username = verify_token(token)
         if username:
@@ -101,7 +98,15 @@ def login(request: LoginRequest) -> TokenResponse:
     if not ADMIN_PASSWORD_HASH:
         raise HTTPException(status_code=500, detail="Admin password not configured")
 
-    if not pwd_context.verify(request.password, ADMIN_PASSWORD_HASH):
+    try:
+        valid = bcrypt.checkpw(
+            request.password.encode("utf-8"),
+            ADMIN_PASSWORD_HASH.encode("utf-8"),
+        )
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Invalid password hash")
+
+    if not valid:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token(request.username)
@@ -110,4 +115,4 @@ def login(request: LoginRequest) -> TokenResponse:
 
 def hash_password(password: str) -> str:
     """Generate bcrypt hash for a password (for setup only)."""
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heavenletters Search</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f0eb;
+    color: #2d2d2d;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  header {
+    width: 100%;
+    padding: 2rem 1rem 0;
+    text-align: center;
+  }
+
+  header h1 {
+    font-size: 1.8rem;
+    font-weight: 300;
+    letter-spacing: 0.04em;
+    color: #8b7355;
+  }
+
+  header p {
+    font-size: 0.85rem;
+    color: #a89880;
+    margin-top: 0.25rem;
+  }
+
+  main {
+    width: 100%;
+    max-width: 720px;
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  /* ── Login ─────────────────────────────────────────── */
+  #login-screen {
+    max-width: 360px;
+    margin: 4rem auto 0;
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  #login-screen h2 {
+    font-weight: 400;
+    margin-bottom: 1.25rem;
+    color: #5a4a3a;
+  }
+
+  #login-screen label {
+    display: block;
+    font-size: 0.8rem;
+    color: #888;
+    margin-bottom: 0.25rem;
+  }
+
+  #login-screen input {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  #login-screen input:focus {
+    border-color: #8b7355;
+  }
+
+  #login-screen button {
+    width: 100%;
+    padding: 0.65rem;
+    background: #8b7355;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  #login-screen button:hover { background: #6b5540; }
+  #login-screen .error { color: #c44; font-size: 0.8rem; margin-top: 0.5rem; min-height: 1.2em; }
+
+  /* ── Search ─────────────────────────────────────────── */
+  #search-screen { display: none; }
+
+  .search-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .search-bar input[type="text"] {
+    flex: 1;
+    padding: 0.7rem 1rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 1rem;
+    outline: none;
+    background: white;
+    transition: border-color 0.15s;
+  }
+
+  .search-bar input[type="text"]:focus {
+    border-color: #8b7355;
+  }
+
+  .search-bar button {
+    padding: 0.7rem 1.5rem;
+    background: #8b7355;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  .search-bar button:hover { background: #6b5540; }
+
+  .search-options {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .search-options label {
+    color: #888;
+    margin-right: 0.25rem;
+  }
+
+  .search-options select {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    background: white;
+    color: #555;
+  }
+
+  .search-options input[type="checkbox"] {
+    margin-left: 1rem;
+  }
+
+  .backend-badge {
+    margin-left: auto;
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    background: #e8e0d5;
+    color: #8b7355;
+  }
+
+  /* ── Results ────────────────────────────────────────── */
+  .status {
+    text-align: center;
+    color: #999;
+    padding: 2rem 0;
+    font-size: 0.9rem;
+  }
+
+  .result {
+    background: white;
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    transition: box-shadow 0.15s;
+  }
+
+  .result:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+
+  .result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+  }
+
+  .result-title {
+    font-size: 1.05rem;
+    font-weight: 500;
+  }
+
+  .result-title a {
+    color: #5a4a3a;
+    text-decoration: none;
+  }
+
+  .result-title a:hover { text-decoration: underline; }
+
+  .result-number {
+    font-size: 0.8rem;
+    color: #aaa;
+    white-space: nowrap;
+  }
+
+  .result-excerpt {
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: #555;
+  }
+
+  .result-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: #bbb;
+  }
+
+  .result-meta span {
+    background: #f5f0eb;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+  }
+
+  /* ── Analysis ───────────────────────────────────────── */
+  #analyze-result {
+    margin-top: 2rem;
+    background: #faf8f5;
+    border-left: 3px solid #8b7355;
+    padding: 1.25rem 1.5rem;
+    border-radius: 0 6px 6px 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    display: none;
+  }
+
+  #analyze-result h3 {
+    font-weight: 400;
+    color: #8b7355;
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+
+  /* ── Logout ─────────────────────────────────────────── */
+  .logout {
+    position: absolute;
+    top: 1rem;
+    right: 1.5rem;
+    font-size: 0.8rem;
+    color: #aaa;
+    cursor: pointer;
+  }
+  .logout:hover { color: #666; }
+
+  /* ── Spinner ────────────────────────────────────────── */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid #ddd;
+    border-top-color: #8b7355;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #search-btn.loading { opacity: 0.7; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<!-- ═══ Login Screen ═══════════════════════════════════════════════ -->
+<header>
+  <h1>Heavenletters</h1>
+  <p>Semantic Search — Private Beta</p>
+</header>
+
+<main>
+<div id="login-screen">
+  <h2>Sign in</h2>
+  <label for="username">Username</label>
+  <input type="text" id="username" placeholder="admin" autocomplete="username">
+  <label for="password">Password</label>
+  <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+  <button onclick="doLogin()">Sign in</button>
+  <div class="error" id="login-error"></div>
+</div>
+
+<!-- ═══ Search Screen ══════════════════════════════════════════════ -->
+<div id="search-screen">
+  <span class="logout" onclick="doLogout()">sign out</span>
+
+  <div class="search-bar">
+    <input type="text" id="query" placeholder="Search 6,617 Heavenletters…" 
+           autofocus onkeydown="if(event.key==='Enter')doSearch()">
+    <button id="search-btn" onclick="doSearch()">Search</button>
+  </div>
+
+  <div class="search-options">
+    <label for="mode">Mode:</label>
+    <select id="mode">
+      <option value="hybrid" selected>Hybrid</option>
+      <option value="semantic">Semantic</option>
+      <option value="keyword">Keyword</option>
+    </select>
+
+    <label for="top" style="margin-left:0.75rem">Results:</label>
+    <select id="top">
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="20">20</option>
+    </select>
+
+    <label style="margin-left:1rem">
+      <input type="checkbox" id="analyze-check" onchange="toggleAnalyze()"> Analyze
+    </label>
+
+    <span class="backend-badge" id="backend-badge">…</span>
+  </div>
+
+  <div id="results"></div>
+  <div id="analyze-result"></div>
+</div>
+</main>
+
+<script>
+// ═══ State ══════════════════════════════════════════════════════════
+const API = '';
+let token = localStorage.getItem('hl_token') || '';
+
+// ═══ Init ══════════════════════════════════════════════════════════
+if (token) showSearch();
+else showLogin();
+fetchHealth();
+
+async function fetchHealth() {
+  try {
+    const r = await fetch(API + '/health');
+    const d = await r.json();
+    const badge = document.getElementById('backend-badge');
+    if (badge) {
+      const b = d.backend === 'auto' ? 'Vertex' : d.backend;
+      badge.textContent = '⚡ ' + b;
+    }
+  } catch(e) {}
+}
+
+// ═══ Login ═════════════════════════════════════════════════════════
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'block';
+  document.getElementById('search-screen').style.display = 'none';
+  localStorage.removeItem('hl_token');
+  token = '';
+}
+
+function showSearch() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('search-screen').style.display = 'block';
+  document.getElementById('results').innerHTML = 
+    '<div class="status">Enter a query to search the Heavenletters corpus</div>';
+}
+
+async function doLogin() {
+  const u = document.getElementById('username').value;
+  const p = document.getElementById('password').value;
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+
+  try {
+    const r = await fetch(API + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Login failed');
+    token = d.access_token;
+    localStorage.setItem('hl_token', token);
+    showSearch();
+  } catch(e) {
+    err.textContent = e.message;
+  }
+}
+
+function doLogout() {
+  showLogin();
+}
+
+// ═══ Search ════════════════════════════════════════════════════════
+async function doSearch() {
+  const q = document.getElementById('query').value.trim();
+  if (!q) return;
+
+  const mode = document.getElementById('mode').value;
+  const top = document.getElementById('top').value;
+  const analyze = document.getElementById('analyze-check').checked;
+  const btn = document.getElementById('search-btn');
+
+  btn.classList.add('loading');
+  btn.innerHTML = 'Searching<span class="spinner"></span>';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('analyze-result').style.display = 'none';
+
+  try {
+    const params = new URLSearchParams({ q, mode, top });
+    const r = await fetch(API + '/search?' + params, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (r.status === 401) { showLogin(); return; }
+    if (!r.ok) throw new Error('Search failed');
+
+    const d = await r.json();
+    renderResults(d);
+
+    if (analyze) {
+      await doAnalyze(q, parseInt(top));
+    }
+  } catch(e) {
+    document.getElementById('results').innerHTML = 
+      '<div class="status" style="color:#c44">' + e.message + '</div>';
+  } finally {
+    btn.classList.remove('loading');
+    btn.innerHTML = 'Search';
+  }
+}
+
+function renderResults(d) {
+  const el = document.getElementById('results');
+  if (!d.results || d.results.length === 0) {
+    el.innerHTML = '<div class="status">No results found for "' + esc(d.query) + '"</div>';
+    return;
+  }
+
+  const modeLabel = { semantic: 'Semantic', keyword: 'Keyword', hybrid: 'Hybrid' };
+  const html = d.results.map((r, i) => {
+    const url = r.permalink 
+      ? 'https://heavenletters.org/' + r.permalink 
+      : '#';
+    const num = r.publish_number ? '#' + r.publish_number : '';
+    const source = modeLabel[r.source] || r.source;
+    const date = r.published_date ? r.published_date.slice(0, 10) : '';
+
+    return '<div class="result">' +
+      '<div class="result-header">' +
+        '<span class="result-title"><a href="' + url + '" target="_blank">' + 
+          esc(r.title || 'Heavenletter') + '</a></span>' +
+        '<span class="result-number">' + esc(num) + '</span>' +
+      '</div>' +
+      '<div class="result-excerpt">' + esc(r.excerpt || '') + '</div>' +
+      '<div class="result-meta">' +
+        '<span>' + esc(source) + '</span>' +
+        '<span>score: ' + r.score.toFixed(4) + '</span>' +
+        (date ? '<span>' + esc(date) + '</span>' : '') +
+        '<span>' + esc(d.embedding_backend || '') + '</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  el.innerHTML = html;
+}
+
+// ═══ Analyze ═══════════════════════════════════════════════════════
+async function doAnalyze(query, topK) {
+  const el = document.getElementById('analyze-result');
+  el.style.display = 'block';
+  el.innerHTML = '<h3>Analysis</h3><div class="status">Analyzing…<span class="spinner"></span></div>';
+
+  try {
+    const r = await fetch(API + '/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({ query, top_k: topK })
+    });
+    if (!r.ok) {
+      const d = await r.json();
+      throw new Error(d.detail || 'Analysis failed');
+    }
+    const d = await r.json();
+    el.innerHTML = '<h3>Analysis</h3>' + 
+      d.analysis.split('\n').filter(l => l.trim()).map(l => '<p>' + esc(l) + '</p>').join('') +
+      (d.tokens_used ? '<div class="result-meta"><span>' + d.tokens_used + ' tokens</span></div>' : '');
+  } catch(e) {
+    el.innerHTML = '<h3>Analysis</h3><p style="color:#c44">' + e.message + '</p>';
+  }
+}
+
+function toggleAnalyze() {}
+
+// ═══ Helpers ═══════════════════════════════════════════════════════
+function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>

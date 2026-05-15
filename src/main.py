@@ -17,6 +17,8 @@ from typing import Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .auth import LoginRequest, TokenResponse, login, require_auth
@@ -90,6 +92,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Static UI ──────────────────────────────────────────────────────
+
+UI_DIR = os.path.join(os.path.dirname(__file__), "ui")
+
+if os.path.isdir(UI_DIR):
+    app.mount("/static", StaticFiles(directory=UI_DIR), name="static")
+
+    @app.get("/")
+    async def serve_ui():
+        return FileResponse(os.path.join(UI_DIR, "index.html"))
 
 
 # ── Models ──────────────────────────────────────────────────────────
