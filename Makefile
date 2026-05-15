@@ -1,4 +1,4 @@
-.PHONY: install test dev build up down shell ingest password
+.PHONY: install test dev build up down shell ingest ingest-vertex ingest-local password query
 
 # Install dependencies in a virtual environment
 install:
@@ -7,7 +7,7 @@ install:
 	./venv/bin/pip install -r requirements.txt
 	@echo ""
 	@echo "✓ Installation complete."
-	@echo "  The first run will download all-MiniLM-L6-v2 (~80MB)."
+	@echo "  Embedding models download on first use."
 
 # Run the end-to-end test
 test:
@@ -30,10 +30,29 @@ down:
 shell:
 	docker compose exec heaven-search bash
 
-# Ingest JSON batches
+# ── Ingestion ───────────────────────────────────────────────────────
+
+# Ingest with Vertex AI (cloud) — best quality, needs VERTEX_API_KEY
+# Usage: make ingest-vertex FILES="data/batch_*.json"
+ingest-vertex:
+	./venv/bin/python -m src.ingest $(FILES) --backend vertex
+
+# Ingest with local bge-base-en-v1.5 (~438MB download, 768-dim)
+# Usage: make ingest-local FILES="data/batch_*.json"
+ingest-local:
+	./venv/bin/python -m src.ingest $(FILES) --backend local
+
+# Ingest with MiniLM (384-dim, legacy, ~80MB)
+# Usage: make ingest-minilm FILES="data/batch_*.json"
+ingest-minilm:
+	./venv/bin/python -m src.ingest $(FILES) --backend minilm
+
+# Backward-compatible: uses default backend (vertex)
 # Usage: make ingest FILES="data/batch_001.json data/batch_002.json"
 ingest:
 	./venv/bin/python -m src.ingest $(FILES)
+
+# ── Utilities ───────────────────────────────────────────────────────
 
 # Generate a password hash for the admin user
 password:
@@ -44,3 +63,8 @@ password:
 # Usage: make query Q="creating community" TOP=5
 query:
 	./venv/bin/python -m src.cli search "$(Q)" --top $(or $(TOP),10)
+
+# Database statistics
+# Usage: make stats
+stats:
+	./venv/bin/python -m src.cli stats

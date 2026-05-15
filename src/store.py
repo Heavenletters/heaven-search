@@ -1,7 +1,8 @@
 """SQLite-backed document store with numpy vector matrix.
 
 Documents are stored in SQLite with FTS5 full-text search.
-Embeddings live in a memory-mapped .npy file (6617 × 384 = ~10 MB).
+Embeddings live in memory-mapped .npy files — one per embedding backend.
+Both Vertex (768-dim) and local bge-base (768-dim) share the same SQLite DB.
 """
 
 from __future__ import annotations
@@ -49,18 +50,33 @@ CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON docs BEGIN
 END;
 """
 
-EMBEDDING_DIM = 384
+# Default embedding dimension — matches both Vertex (768) and bge-base (768).
+# Legacy MiniLM (384) is supported via the dim parameter.
+DEFAULT_EMBEDDING_DIM = 768
 
 
 class DocStore:
-    """Manages documents in SQLite and embeddings in a .npy file."""
+    """Manages documents in SQLite and embeddings in a .npy file.
 
-    def __init__(self, data_dir: str | Path = "data"):
+    Each embedding backend gets its own .npy file (e.g. embeddings_vertex.npy,
+    embeddings_local.npy) sharing the same docs.db.
+    """
+
+    def __init__(
+        self,
+        data_dir: str | Path = "data",
+        dim: int = DEFAULT_EMBEDDING_DIM,
+        vec_suffix: str = "vertex",
+    ):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.db_path = self.data_dir / "docs.db"
-        self.vec_path = self.data_dir / "embeddings.npy"
+        self.vec_path = self.data_dir / f"embeddings_{vec_suffix}.npy"
+        self._legacy_path = self.data_dir / "embeddings.npy"
+
+        # Auto-detect dimension from existing file (handles legacy migrations)
+        self.dim = self._detect_dim() or dim
 
         self._conn: sqlite3.Connection | None = None
         self._vectors: np.ndarray | None = None
@@ -86,12 +102,20 @@ class DocStore:
 
     @property
     def vectors(self) -> np.ndarray:
-        """Return (N, 384) embedding matrix, loading on first access."""
+        """Return (N, dim) embedding matrix, loading on first access.
+
+        Checks the configured vec_path first, falls back to legacy
+        embeddings.npy for migration compatibility.
+        """
         if self._vectors is None:
-            if self.vec_path.exists():
-                self._vectors = np.load(self.vec_path, mmap_mode="r")
+            path = self.vec_path
+            if not path.exists() and self._legacy_path.exists():
+                path = self._legacy_path
+
+            if path.exists():
+                self._vectors = np.load(path, mmap_mode="r")
             else:
-                self._vectors = np.empty((0, EMBEDDING_DIM), dtype=np.float32)
+                self._vectors = np.empty((0, self.dim), dtype=np.float32)
         return self._vectors
 
     def reload_vectors(self):
@@ -103,6 +127,29 @@ class DocStore:
         """Persist embedding matrix to disk."""
         np.save(self.vec_path, vecs.astype(np.float32))
         self.reload_vectors()
+
+    @property
+    def has_vectors(self) -> bool:
+        """Whether this backend has ingested embeddings."""
+        return (
+            (self.vec_path.exists() and self.vec_path.stat().st_size > 0)
+            or (self._legacy_path.exists() and self._legacy_path.stat().st_size > 0)
+        )
+
+    def _detect_dim(self) -> int | None:
+        """Detect embedding dimension from an existing .npy file.
+
+        Checks the configured vec_path first, then the legacy embeddings.npy.
+        Returns None if no file exists.
+        """
+        for p in (self.vec_path, self._legacy_path):
+            if p.exists() and p.stat().st_size > 0:
+                try:
+                    arr = np.load(p, mmap_mode="r")
+                    return arr.shape[1]
+                except (ValueError, IndexError, OSError):
+                    continue
+        return None
 
     # ── document operations ────────────────────────────────────────
 
@@ -124,22 +171,35 @@ class DocStore:
             title = titles[i] if titles else None
             meta = json.dumps(metadata_list[i]) if metadata_list else "{}"
 
+            # Use INSERT OR IGNORE to handle re-ingestion of same external_id
             cur.execute(
-                "INSERT INTO docs (external_id, title, content, metadata) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO docs (external_id, title, content, metadata) VALUES (?, ?, ?, ?)",
                 (ext_id, title, contents[i], meta),
             )
-            ids.append(cur.lastrowid)
+            ids.append(cur.lastrowid if cur.lastrowid else 0)
         self.conn.commit()
 
-        # Append embeddings to matrix
-        existing = (
-            np.load(self.vec_path, mmap_mode="r")
-            if self.vec_path.exists()
-            else np.empty((0, EMBEDDING_DIM), dtype=np.float32)
-        )
-        combined = np.vstack([existing, embeddings]) if len(existing) > 0 else embeddings
-        self.save_vectors(combined)
+        # For re-ingestion (INSERT OR IGNORE skips duplicates), rebuild the
+        # full vector matrix from scratch using the current row count.
+        # Embeddings are always a full re-ingestion, so just save the full array.
+        expected_count = self.count()
+        if len(embeddings) != expected_count:
+            # Partial ingestion — append to existing
+            existing = (
+                np.load(self.vec_path, mmap_mode="r")
+                if self.vec_path.exists()
+                else np.empty((0, self.dim), dtype=np.float32)
+            )
+            # Only append the new ones (last len(embeddings) - len(existing))
+            new_count = len(embeddings) - len(existing)
+            if new_count > 0:
+                combined = np.vstack([existing, embeddings[-new_count:]])
+            else:
+                combined = embeddings
+        else:
+            combined = embeddings
 
+        self.save_vectors(combined)
         return ids
 
     def get_document(self, row_id: int) -> dict[str, Any] | None:
@@ -154,6 +214,8 @@ class DocStore:
 
     def get_documents(self, row_ids: list[int]) -> list[dict[str, Any]]:
         """Retrieve multiple documents by internal IDs, preserving order."""
+        if not row_ids:
+            return []
         placeholders = ",".join("?" * len(row_ids))
         rows = self.conn.execute(
             f"SELECT id, external_id, title, content, metadata, created_at FROM docs WHERE id IN ({placeholders})",
@@ -185,20 +247,15 @@ class DocStore:
         has_dangerous = any(c in query for c in fts5_syntax_chars)
 
         if not has_dangerous and not has_trailing_punct:
-            # Safe — pass through for word-match behavior
             return query
 
-        # Wrap in quotes for literal phrase matching
         escaped = query.replace('"', '""')
         return f'"{escaped}"'
 
-    def keyword_search(self, query: str, limit: int = 20, force_phrase: bool = False) -> list[dict[str, Any]]:
-        """FTS5 keyword search. Returns matching documents.
-
-        If force_phrase is True, the query is always wrapped in quotes
-        for literal phrase matching (adjacency required). Otherwise,
-        quotes are only added when the query contains FTS5-breaking chars.
-        """
+    def keyword_search(
+        self, query: str, limit: int = 20, force_phrase: bool = False
+    ) -> list[dict[str, Any]]:
+        """FTS5 keyword search. Returns matching documents."""
         if force_phrase:
             escaped = query.replace('"', '""')
             safe_query = f'"{escaped}"'
@@ -227,13 +284,17 @@ class DocStore:
         """Total number of documents."""
         return self.conn.execute("SELECT COUNT(*) FROM docs").fetchone()[0]
 
+    def clear_vectors(self):
+        """Delete embedding vectors only (keep documents)."""
+        if self.vec_path.exists():
+            self.vec_path.unlink()
+        self.reload_vectors()
+
     def clear(self):
         """Delete all documents and embeddings."""
         self.conn.execute("DELETE FROM docs")
         self.conn.commit()
-        if self.vec_path.exists():
-            self.vec_path.unlink()
-        self.reload_vectors()
+        self.clear_vectors()
 
     def __len__(self) -> int:
         return self.count()
@@ -247,7 +308,6 @@ class DocStore:
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
-    # Parse metadata JSON
     if "metadata" in d and isinstance(d["metadata"], str):
         try:
             d["metadata"] = json.loads(d["metadata"])

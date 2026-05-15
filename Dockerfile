@@ -18,8 +18,8 @@ COPY scripts/ ./scripts/
 # Create data directory
 RUN mkdir -p /app/data
 
-# Pre-download the embedding model during build
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2', device='cpu')"
+# Pre-download the local embedding model during build
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')"
 
 EXPOSE 8000
 

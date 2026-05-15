@@ -1,4 +1,7 @@
-"""Semantic + keyword hybrid search over the document store."""
+"""Semantic + keyword hybrid search over the document store.
+
+Supports dual vector stores (Vertex + local) with automatic failover.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ import re
 
 import numpy as np
 
-from .embedder import embed_query
+from .embedder import AutoEmbedder, Embedder, get_embedder
 from .store import DocStore
 
 
@@ -21,19 +24,16 @@ def generate_excerpt(content: str, query: str, max_length: int = 300) -> str:
       3. Return the best sentence ± surrounding context, up to max_length.
       4. Fall back to the first max_length chars if no good match.
     """
-    # Normalise and tokenise query for matching
     query_terms = set(re.findall(r"\w+", query.lower()))
     if not query_terms:
         return _truncate(content, max_length)
 
-    # Split into sentences (handles \r\n and \n)
     sentences = re.split(r"(?<=[.!?])\s+|\r?\n", content)
     sentences = [s.strip() for s in sentences if s.strip()]
 
     if not sentences:
         return _truncate(content, max_length)
 
-    # Score each sentence
     best_idx = 0
     best_score = -1
     for i, sent in enumerate(sentences):
@@ -43,11 +43,9 @@ def generate_excerpt(content: str, query: str, max_length: int = 300) -> str:
             best_score = overlap
             best_idx = i
 
-    # If no overlap at all, use the beginning
     if best_score == 0:
         return _truncate(content, max_length)
 
-    # Build excerpt from best sentence ± neighbours
     excerpt_parts: list[str] = []
     total_len = 0
     start = max(0, best_idx - 1)
@@ -57,7 +55,6 @@ def generate_excerpt(content: str, query: str, max_length: int = 300) -> str:
             break
         excerpt_parts.append(sentences[i])
         total_len += len(sentences[i]) + 1
-        # Stop after including the best sentence + 1 after
         if i > best_idx:
             break
 
@@ -68,51 +65,10 @@ def generate_excerpt(content: str, query: str, max_length: int = 300) -> str:
 
 
 def _truncate(text: str, max_length: int) -> str:
-    """Truncate text to max_length, adding ellipsis if needed."""
     text = text.replace("\r\n", " ").replace("\n", " ").strip()
     if len(text) <= max_length:
         return text
     return text[:max_length].rstrip() + "…"
-
-
-def semantic_search(
-    store: DocStore,
-    query: str,
-    top_k: int = 10,
-    min_score: float = 0.0,
-) -> list[dict]:
-    """Embed query and return top-k documents by cosine similarity.
-
-    Uses brute-force dot product against the (N, 384) vector matrix.
-    On 6,617 documents this takes <500μs on any hardware made after 2005.
-    """
-    if len(store.vectors) == 0:
-        return []
-
-    q_vec = embed_query(query)  # (384,), already normalized
-    scores = np.dot(store.vectors, q_vec)  # (N,) cosine similarities
-
-    # Get top-k indices
-    if top_k >= len(scores):
-        top_indices = np.argsort(scores)[::-1]
-    else:
-        # Partial sort — faster for small k
-        top_indices = np.argpartition(scores, -top_k)[-top_k:]
-        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
-
-    results = []
-    for idx in top_indices:
-        score = float(scores[idx])
-        if score < min_score:
-            continue
-        doc = store.get_document(idx + 1)  # internal IDs are 1-based
-        if doc:
-            doc["_score"] = round(score, 4)
-            doc["_source"] = "semantic"
-            doc["_excerpt"] = generate_excerpt(doc["content"], query)
-            results.append(doc)
-
-    return results
 
 
 # ── Query fragment extraction ──────────────────────────────────────
@@ -128,17 +84,13 @@ def _extract_fragments(query: str, max_fragments: int = 4) -> list[str]:
     Example: "The illusion created is that One ever existed as Two."
       → ["One ever existed as Two", "ever existed as Two", "existed as Two", "as Two"]
     """
-    # Strip trailing punctuation
     clean = re.sub(r'[.!?,;:]+$', '', query.strip())
     words = clean.split()
     n = len(words)
 
     fragments = []
-    # Try fragments of decreasing length, starting from ~6 words
     for frag_len in range(min(n, 6), 1, -1):
-        # Take the last frag_len words (most distinctive tail)
         frag = ' '.join(words[-frag_len:])
-        # Skip fragments that are identical to earlier (longer) ones or too short
         if len(frag.split()) >= 3 and frag not in fragments:
             fragments.append(frag)
         if len(fragments) >= max_fragments:
@@ -146,6 +98,75 @@ def _extract_fragments(query: str, max_fragments: int = 4) -> list[str]:
 
     return fragments
 
+
+# ── Semantic search ─────────────────────────────────────────────────
+
+def semantic_search(
+    store: DocStore,
+    query: str,
+    top_k: int = 10,
+    min_score: float = 0.0,
+    embedder: Embedder | None = None,
+    fallback_store: DocStore | None = None,
+) -> list[dict]:
+    """Embed query and return top-k documents by cosine similarity.
+
+    Uses brute-force dot product against the (N, dim) vector matrix.
+    With 6,617 documents and 768-dim vectors, this takes ~1ms on any
+    hardware made after 2005.
+
+    If embedder is an AutoEmbedder with a healthy primary, uses the
+    primary store's vectors. On primary failure, automatically falls
+    back to the fallback store's vectors (local bge-base embeddings).
+    """
+    if embedder is None:
+        embedder = get_embedder()
+
+    # Determine which vector store to use based on embedder health
+    use_store = store
+    if isinstance(embedder, AutoEmbedder):
+        if embedder.primary_healthy:
+            # Primary (Vertex) is healthy — prefer that store
+            pass
+        elif fallback_store is not None:
+            use_store = fallback_store
+
+    if len(use_store.vectors) == 0:
+        return []
+
+    q_vec = embedder.embed_query(query)
+
+    # Validate dimension match
+    if q_vec.shape[0] != use_store.vectors.shape[1]:
+        raise ValueError(
+            f"Query vector dim ({q_vec.shape[0]}) doesn't match "
+            f"store vector dim ({use_store.vectors.shape[1]})"
+        )
+
+    scores = np.dot(use_store.vectors, q_vec)
+
+    if top_k >= len(scores):
+        top_indices = np.argsort(scores)[::-1]
+    else:
+        top_indices = np.argpartition(scores, -top_k)[-top_k:]
+        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+
+    results = []
+    for idx in top_indices:
+        score = float(scores[idx])
+        if score < min_score:
+            continue
+        doc = use_store.get_document(idx + 1)
+        if doc:
+            doc["_score"] = round(score, 4)
+            doc["_source"] = "semantic"
+            doc["_excerpt"] = generate_excerpt(doc["content"], query)
+            results.append(doc)
+
+    return results
+
+
+# ── Keyword search ──────────────────────────────────────────────────
 
 def keyword_search(
     store: DocStore,
@@ -176,14 +197,9 @@ def keyword_search(
     if len(results) < min_results and len(query.split()) > 3:
         fragments = _extract_fragments(query)
         for i, frag in enumerate(fragments):
-            # Use phrase matching for fragments — adjacency requirement makes
-            # them far more selective. The cascade of different fragment lengths
-            # already provides the fuzziness needed for slight misquotes.
             frag_results = store.keyword_search(frag, limit=top_k, force_phrase=True)
-            # Score penalty: fragments get lower priority than exact matches.
-            # Longer (more distinctive) fragments get less penalty.
+            # Score penalty: longer (more distinctive) fragments get less penalty
             penalty = 0.6 - (i * 0.1)
-            frag_label = frag
             for r in frag_results:
                 doc_id = r["id"]
                 if doc_id not in seen_ids:
@@ -199,19 +215,28 @@ def keyword_search(
     return results
 
 
+# ── Hybrid search ───────────────────────────────────────────────────
+
 def hybrid_search(
     store: DocStore,
     query: str,
     top_k: int = 10,
     semantic_weight: float = 0.7,
+    embedder: Embedder | None = None,
+    fallback_store: DocStore | None = None,
 ) -> list[dict]:
     """Combine semantic and keyword results with reciprocal rank fusion.
 
     Retrieves top_k * 3 from each source, fuses with RRF, returns top_k.
+
+    Uses dual vector stores with auto-failover: primary (Vertex) first,
+    falls back to local (bge-base) on errors.
     """
     fetch_k = max(top_k * 3, 20)
 
-    semantic_results = semantic_search(store, query, top_k=fetch_k)
+    semantic_results = semantic_search(
+        store, query, top_k=fetch_k, embedder=embedder, fallback_store=fallback_store
+    )
     keyword_results = keyword_search(store, query, top_k=fetch_k)
 
     # Reciprocal Rank Fusion
@@ -224,8 +249,6 @@ def hybrid_search(
     has_exact_keyword = any(
         r.get("_match_type") == "exact" for r in keyword_results
     )
-    # If keyword leg is all fragments, boost its weight — text matches
-    # are more valuable than broad semantic similarity for citation queries
     kw_weight = (
         1 - semantic_weight
         if has_exact_keyword
@@ -244,7 +267,6 @@ def hybrid_search(
         if doc_id not in docs:
             docs[doc_id] = doc
 
-    # Sort by fused score
     sorted_ids = sorted(scores, key=scores.get, reverse=True)[:top_k]
 
     results = []

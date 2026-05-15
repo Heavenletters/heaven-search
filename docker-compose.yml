@@ -13,7 +13,9 @@ services:
       - HEAVEN_JWT_SECRET=${HEAVEN_JWT_SECRET:-change-me-in-production}
       - HEAVEN_ADMIN_USER=${HEAVEN_ADMIN_USER:-admin}
       - HEAVEN_ADMIN_PASSWORD_HASH=${HEAVEN_ADMIN_PASSWORD_HASH:-}
-      # LLM API (optional — only needed for /analyze endpoint)
+      # Embedding backend
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-auto}
+      - VERTEX_API_KEY=${VERTEX_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       # CORS

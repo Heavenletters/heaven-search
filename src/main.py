@@ -2,8 +2,8 @@
 
 Endpoints:
     POST /auth/login         — get JWT token
-    GET  /search             — semantic/hybrid search
-    GET  /documents/{id}    — retrieve document
+    GET  /search             — semantic/hybrid search (auto-failover)
+    GET  /documents/{id}     — retrieve document
     GET  /stats              — database stats
     POST /analyze            — search + LLM analysis (requires DEEPSEEK_API_KEY)
 """
@@ -20,30 +20,60 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .auth import LoginRequest, TokenResponse, login, require_auth
+from .embedder import AutoEmbedder, get_embedder
 from .search import hybrid_search, keyword_search, semantic_search
-from .store import DocStore
+from .store import DEFAULT_EMBEDDING_DIM, DocStore
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
-_store: DocStore | None = None
+# Dual stores: share the same SQLite DB, different .npy vector files
+_vertex_store: DocStore | None = None
+_local_store: DocStore | None = None
+_embedder = None
 
 
-def get_store() -> DocStore:
-    global _store
-    if _store is None:
-        _store = DocStore("data")
-    return _store
+def get_vertex_store() -> DocStore:
+    global _vertex_store
+    if _vertex_store is None:
+        _vertex_store = DocStore("data", dim=DEFAULT_EMBEDDING_DIM, vec_suffix="vertex")
+    return _vertex_store
+
+
+def get_local_store() -> DocStore:
+    global _local_store
+    if _local_store is None:
+        _local_store = DocStore("data", dim=DEFAULT_EMBEDDING_DIM, vec_suffix="local")
+    return _local_store
+
+
+def get_embedder_instance():
+    global _embedder
+    if _embedder is None:
+        vertex_store = get_vertex_store()
+        local_store = get_local_store()
+        # If Vertex vectors exist, use auto (Vertex primary, local fallback)
+        if vertex_store.has_vectors and vertex_store.dim == 768:
+            _embedder = get_embedder("auto")
+        # If only legacy MiniLM (384-dim) exists, use that directly
+        elif local_store.has_vectors and local_store.dim == 384:
+            _embedder = get_embedder("minilm")
+        # Fall back to configured backend
+        else:
+            _embedder = get_embedder()
+    return _embedder
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    get_store()
+    get_vertex_store()
+    get_local_store()
+    get_embedder_instance()
     yield
-    # Shutdown
-    if _store:
-        _store.close()
+    if _vertex_store:
+        _vertex_store.close()
+    if _local_store:
+        _local_store.close()
 
 
 app = FastAPI(
@@ -53,7 +83,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow web UI on any origin in dev, lock down in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
@@ -73,7 +102,6 @@ class SearchResult(BaseModel):
     metadata: dict = {}
     score: float
     source: str  # "semantic", "keyword", or "hybrid"
-    # Heavenletter-specific fields (extracted from metadata for convenience)
     permalink: Optional[str] = None
     publish_number: Optional[int] = None
     published_date: Optional[str] = None
@@ -85,13 +113,14 @@ class SearchResponse(BaseModel):
     mode: str
     total_docs: int
     results: list[SearchResult]
+    embedding_backend: str = "unknown"
 
 
 class AnalyzeRequest(BaseModel):
     query: str
     instructions: str = "Analyze the following documents and answer the user's question."
     top_k: int = 5
-    model: str = "deepseek-chat"  # or deepseek-reasoner for deep thinking
+    model: str = "deepseek-chat"
 
 
 class AnalyzeResponse(BaseModel):
@@ -106,7 +135,6 @@ class AnalyzeResponse(BaseModel):
 
 @app.post("/auth/login", response_model=TokenResponse)
 def auth_login(req: LoginRequest):
-    """Get a JWT token for API access."""
     return login(req)
 
 
@@ -117,22 +145,40 @@ def api_search(
     top: int = Query(10, ge=1, le=100),
     _user: str = Depends(require_auth),
 ):
-    """Search the Heavenletters corpus."""
-    store = get_store()
-    total = store.count()
+    vertex_store = get_vertex_store()
+    local_store = get_local_store()
+    embedder = get_embedder_instance()
+    total = vertex_store.count()
+
+    # Determine which store to use for semantic search based on what's ingested
+    primary_store = vertex_store if vertex_store.has_vectors else local_store
 
     if mode == "semantic":
-        results = semantic_search(store, q, top_k=top)
+        results = semantic_search(
+            primary_store, q, top_k=top,
+            embedder=embedder, fallback_store=local_store,
+        )
     elif mode == "keyword":
-        results = keyword_search(store, q, top_k=top)
+        results = keyword_search(vertex_store, q, top_k=top)
     else:
-        results = hybrid_search(store, q, top_k=top)
+        results = hybrid_search(
+            primary_store, q, top_k=top,
+            embedder=embedder, fallback_store=local_store,
+        )
+
+    # Detect which backend was actually used
+    backend_used = "unknown"
+    if isinstance(embedder, AutoEmbedder):
+        backend_used = "vertex" if embedder.primary_healthy else "local"
+    else:
+        backend_used = type(embedder).__name__.lower().replace("embedder", "")
 
     return SearchResponse(
         query=q,
         mode=mode,
         total_docs=total,
         results=[SearchResponse._scrub(r) for r in results],
+        embedding_backend=backend_used,
     )
 
 
@@ -141,8 +187,7 @@ def api_get_document(
     doc_id: int,
     _user: str = Depends(require_auth),
 ):
-    """Retrieve a single document by internal ID."""
-    store = get_store()
+    store = get_vertex_store()
     doc = store.get_document(doc_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -151,17 +196,27 @@ def api_get_document(
 
 @app.get("/stats")
 def api_stats(_user: str = Depends(require_auth)):
-    """Get database statistics."""
-    store = get_store()
-    import os
-    from pathlib import Path
+    vertex_store = get_vertex_store()
+    local_store = get_local_store()
 
-    data_dir = Path("data")
-    vec_path = data_dir / "embeddings.npy"
+    def _vec_info(store: DocStore) -> dict:
+        try:
+            if store.has_vectors:
+                path = store.vec_path if store.vec_path.exists() else store._legacy_path
+                size_mb = round(path.stat().st_size / (1024 * 1024), 2)
+                return {"has_vectors": True, "dim": store.dim, "size_mb": size_mb}
+        except (FileNotFoundError, OSError):
+            pass
+        return {"has_vectors": False, "dim": store.dim, "size_mb": 0}
+
     return {
-        "total_documents": store.count(),
-        "db_size_mb": round(store.db_path.stat().st_size / (1024 * 1024), 2) if store.db_path.exists() else 0,
-        "vector_size_mb": round(vec_path.stat().st_size / (1024 * 1024), 2) if vec_path.exists() else 0,
+        "total_documents": vertex_store.count(),
+        "db_size_mb": (
+            round(vertex_store.db_path.stat().st_size / (1024 * 1024), 2)
+            if vertex_store.db_path.exists() else 0
+        ),
+        "vertex": _vec_info(vertex_store),
+        "local": _vec_info(local_store),
     }
 
 
@@ -170,12 +225,18 @@ async def api_analyze(
     req: AnalyzeRequest,
     _user: str = Depends(require_auth),
 ):
-    """Search + LLM analysis. Retrieves top-k documents and passes them to DeepSeek."""
     if not DEEPSEEK_API_KEY:
         raise HTTPException(status_code=500, detail="DEEPSEEK_API_KEY not configured")
 
-    store = get_store()
-    results = hybrid_search(store, req.query, top_k=req.top_k)
+    vertex_store = get_vertex_store()
+    local_store = get_local_store()
+    embedder = get_embedder_instance()
+    primary_store = vertex_store if vertex_store.has_vectors else local_store
+
+    results = hybrid_search(
+        primary_store, req.query, top_k=req.top_k,
+        embedder=embedder, fallback_store=local_store,
+    )
 
     if not results:
         return AnalyzeResponse(
@@ -185,7 +246,6 @@ async def api_analyze(
             analysis="No relevant documents found.",
         )
 
-    # Build context from retrieved documents
     context_parts = []
     for i, doc in enumerate(results, 1):
         title = doc.get("title") or f"Heavenletter #{doc.get('external_id', doc['id'])}"
@@ -236,21 +296,26 @@ async def api_analyze(
     )
 
 
-# ── Health check (no auth required) ─────────────────────────────────
-
 @app.get("/health")
 def health():
-    store = get_store()
-    return {"status": "ok", "documents": store.count()}
+    vertex_store = get_vertex_store()
+    local_store = get_local_store()
+    embedder = get_embedder_instance()
+    backend = type(embedder).__name__.lower().replace("embedder", "")
+    return {
+        "status": "ok",
+        "documents": vertex_store.count(),
+        "vertex_ready": vertex_store.has_vectors,
+        "local_ready": local_store.has_vectors,
+        "backend": backend,
+    }
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
-# Attach helper to clean up result dicts for Pydantic serialization
 @staticmethod
 def _scrub(result: dict) -> SearchResult:
     meta = result.get("metadata", {})
-    # publish_number might be stored as int or string in metadata
     pn = meta.get("publish_number")
     if pn is not None:
         try:
@@ -270,6 +335,5 @@ def _scrub(result: dict) -> SearchResult:
         published_date=meta.get("published_date"),
         excerpt=result.get("_excerpt"),
     )
-
 
 SearchResponse._scrub = _scrub  # type: ignore

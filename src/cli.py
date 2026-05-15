@@ -13,41 +13,73 @@ import argparse
 import sys
 from pathlib import Path
 
+from .embedder import AutoEmbedder, get_embedder
 from .search import hybrid_search, keyword_search, semantic_search
-from .store import DocStore
+from .store import DEFAULT_EMBEDDING_DIM, DocStore
+
+
+def _get_stores(data_dir: str):
+    """Return (vertex_store, local_store, primary_store, embedder)."""
+    vertex_store = DocStore(data_dir, dim=DEFAULT_EMBEDDING_DIM, vec_suffix="vertex")
+    local_store = DocStore(data_dir, dim=DEFAULT_EMBEDDING_DIM, vec_suffix="local")
+
+    # If Vertex vectors exist, use auto (Vertex primary, local fallback)
+    if vertex_store.has_vectors and vertex_store.dim == 768:
+        embedder = get_embedder("auto")
+    # If only legacy MiniLM (384-dim) exists, use that directly
+    elif local_store.has_vectors and local_store.dim == 384:
+        embedder = get_embedder("minilm")
+    # Fall back to configured backend
+    else:
+        embedder = get_embedder()
+
+    primary_store = vertex_store if vertex_store.has_vectors else local_store
+    return vertex_store, local_store, primary_store, embedder
 
 
 def cmd_search(args):
-    store = DocStore(args.data_dir)
+    vertex_store, local_store, primary_store, embedder = _get_stores(args.data_dir)
 
-    if store.count() == 0:
+    if vertex_store.count() == 0:
         print("No documents in the database. Ingest some JSON batches first:")
         print("  python -m src.ingest data/*.json")
-        store.close()
+        vertex_store.close()
+        local_store.close()
         return
 
     if args.mode == "semantic":
-        results = semantic_search(store, args.query, top_k=args.top)
+        results = semantic_search(
+            primary_store, args.query, top_k=args.top,
+            embedder=embedder, fallback_store=local_store,
+        )
     elif args.mode == "keyword":
-        results = keyword_search(store, args.query, top_k=args.top)
+        results = keyword_search(vertex_store, args.query, top_k=args.top)
     else:
-        results = hybrid_search(store, args.query, top_k=args.top)
+        results = hybrid_search(
+            primary_store, args.query, top_k=args.top,
+            embedder=embedder, fallback_store=local_store,
+        )
+
+    # Detect backend used
+    backend = "unknown"
+    if isinstance(embedder, AutoEmbedder):
+        backend = "vertex" if embedder.primary_healthy else "local"
 
     if not results:
         print(f"No results for: \"{args.query}\"")
-        store.close()
+        vertex_store.close()
+        local_store.close()
         return
 
     print(f"\n{'─'*70}")
-    print(f" Results for: \"{args.query}\"  ({args.mode}, top {args.top})")
+    print(f" Results for: \"{args.query}\"  ({args.mode}, top {args.top})  [{backend}]")
     print(f"{'─'*70}\n")
 
     for i, doc in enumerate(results, 1):
         title = doc.get("title") or f"#{doc['id']}"
         score = doc.get("_score", "?")
         source = doc.get("_source", "?")
-        
-        # Grab metadata fields
+
         meta = doc.get("metadata", {})
         pub_num = meta.get("publish_number", "Unknown")
         permalink = meta.get("permalink", "")
@@ -57,23 +89,23 @@ def cmd_search(args):
         if permalink:
             print(f"      url: https://heavenletters.org/{permalink}")
 
-        # Show the smart excerpt if it exists, otherwise fall back to content preview
         excerpt = doc.get("_excerpt")
         if not excerpt:
             content = doc["content"]
             excerpt = content[:200].replace("\n", " ").strip()
             if len(content) > 200:
                 excerpt += "…"
-                
+
         print(f"      {excerpt}")
         print()
 
-    store.close()
+    vertex_store.close()
+    local_store.close()
 
 
 def cmd_get(args):
-    store = DocStore(args.data_dir)
-    doc = store.get_document(args.doc_id)
+    vertex_store, local_store, _, _ = _get_stores(args.data_dir)
+    doc = vertex_store.get_document(args.doc_id)
     if doc is None:
         print(f"Document #{args.doc_id} not found.")
     else:
@@ -87,29 +119,44 @@ def cmd_get(args):
         print()
         if doc.get("metadata"):
             print(f"Metadata: {doc['metadata']}")
-    store.close()
+    vertex_store.close()
+    local_store.close()
 
 
 def cmd_stats(args):
-    store = DocStore(args.data_dir)
-    n = store.count()
-    vec_path = Path(args.data_dir) / "embeddings.npy"
-    vec_size_mb = vec_path.stat().st_size / (1024 * 1024) if vec_path.exists() else 0
-    db_size_mb = store.db_path.stat().st_size / (1024 * 1024) if store.db_path.exists() else 0
+    vertex_store, local_store, _, _ = _get_stores(args.data_dir)
+    n = vertex_store.count()
+
+    def _vec_info(label, store):
+        try:
+            if store.has_vectors:
+                path = store.vec_path
+                if not path.exists():
+                    path = store._legacy_path
+                size_mb = path.stat().st_size / (1024 * 1024)
+                return f"  {label}: {size_mb:.1f} MB ({store.dim}-dim)"
+            return f"  {label}: not ingested"
+        except (FileNotFoundError, OSError):
+            return f"  {label}: not ingested"
+
+    db_size_mb = (
+        vertex_store.db_path.stat().st_size / (1024 * 1024)
+        if vertex_store.db_path.exists() else 0
+    )
 
     print(f"\n  Documents:    {n}")
-    print(f"  Vector file:  {vec_size_mb:.1f} MB")
     print(f"  SQLite DB:    {db_size_mb:.1f} MB")
-    print(f"  Total on disk: {(vec_size_mb + db_size_mb):.1f} MB")
+    print(_vec_info("Vertex", vertex_store))
+    print(_vec_info("Local ", local_store))
     print()
-    store.close()
+    vertex_store.close()
+    local_store.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Heavenletters Semantic Search")
     sub = parser.add_subparsers(dest="command")
 
-    # search
     search_p = sub.add_parser("search", help="Search Heavenletters")
     search_p.add_argument("query", help="Search query")
     search_p.add_argument("--top", type=int, default=10, help="Number of results")
@@ -121,12 +168,10 @@ def main():
     )
     search_p.add_argument("--data-dir", default="data", help="Data directory")
 
-    # get
     get_p = sub.add_parser("get", help="Retrieve a document by ID")
     get_p.add_argument("doc_id", type=int, help="Document internal ID")
     get_p.add_argument("--data-dir", default="data", help="Data directory")
 
-    # stats
     stats_p = sub.add_parser("stats", help="Show database statistics")
     stats_p.add_argument("--data-dir", default="data", help="Data directory")
 
