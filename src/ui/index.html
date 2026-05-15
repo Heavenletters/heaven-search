@@ -169,6 +169,8 @@
     color: #8b7355;
   }
 
+  #share-btn:hover { background: #d5c8b5; }
+
   /* ── Results ────────────────────────────────────────── */
   .status {
     text-align: center;
@@ -344,6 +346,7 @@
     <input type="text" id="query" placeholder="Search 6,617 Heavenletters…" 
            autofocus onkeydown="if(event.key==='Enter')doSearch()">
     <button id="search-btn" onclick="doSearch()">Search</button>
+    <button id="share-btn" onclick="doShare()" style="display:none;padding:0.7rem 1rem;background:#e8e0d5;color:#8b7355;border:none;border-radius:6px;font-size:0.85rem;cursor:pointer;white-space:nowrap;" title="Create shareable link">Share</button>
   </div>
 
   <div class="search-options">
@@ -377,6 +380,11 @@
 // ═══ State ══════════════════════════════════════════════════════════
 const API = '';
 let token = localStorage.getItem('hl_token') || '';
+let lastResults = null;
+let lastAnalysis = null;
+let lastQuery = '';
+let lastMode = 'hybrid';
+let lastBackend = '';
 
 // ═══ Init ══════════════════════════════════════════════════════════
 if (token) showSearch();
@@ -460,7 +468,13 @@ async function doSearch() {
     if (!r.ok) throw new Error('Search failed');
 
     const d = await r.json();
+    lastResults = d.results;
+    lastQuery = d.query;
+    lastMode = d.mode;
+    lastBackend = d.embedding_backend || '';
+    lastAnalysis = null;
     renderResults(d);
+    document.getElementById('share-btn').style.display = d.results && d.results.length > 0 ? 'inline-block' : 'none';
 
     if (analyze) {
       await doAnalyze(q, parseInt(top));
@@ -529,6 +543,7 @@ async function doAnalyze(query, topK) {
       throw new Error(d.detail || 'Analysis failed');
     }
     const d = await r.json();
+    lastAnalysis = { analysis: d.analysis, sources: d.sources || [] };
 
     let html = '<h3>Analysis</h3>';
 
@@ -558,6 +573,42 @@ async function doAnalyze(query, topK) {
 }
 
 function toggleAnalyze() {}
+
+// ═══ Share ══════════════════════════════════════════════════════════
+async function doShare() {
+  if (!lastResults) return;
+  const btn = document.getElementById('share-btn');
+  const orig = btn.textContent;
+  btn.textContent = 'Sharing…';
+  btn.style.opacity = '0.7';
+
+  try {
+    const r = await fetch(API + '/share', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({
+        query: lastQuery,
+        mode: lastMode,
+        results: lastResults,
+        analysis: lastAnalysis ? lastAnalysis.analysis : '',
+        sources: lastAnalysis ? lastAnalysis.sources : [],
+        backend: lastBackend
+      })
+    });
+    const d = await r.json();
+    const url = window.location.origin + d.url;
+    await navigator.clipboard.writeText(url);
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '1'; }, 2000);
+  } catch(e) {
+    btn.textContent = 'Failed';
+    btn.style.opacity = '1';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  }
+}
 
 // ═══ Helpers ═══════════════════════════════════════════════════════
 function esc(s) {

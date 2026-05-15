@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -326,6 +327,67 @@ def api_analyze(
     )
 
 
+# ── Share / Permalink ─────────────────────────────────────────────
+
+import hashlib
+import secrets
+
+SHARED_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "shared")
+os.makedirs(SHARED_DIR, exist_ok=True)
+
+
+class ShareRequest(BaseModel):
+    query: str
+    mode: str = "hybrid"
+    results: list[dict] = []
+    analysis: str = ""
+    sources: list[dict] = []
+    backend: str = ""
+
+
+class ShareResponse(BaseModel):
+    url: str
+    slug: str
+
+
+@app.post("/share", response_model=ShareResponse)
+def api_share(req: ShareRequest, _user: str = Depends(require_auth)):
+    """Save search + analysis as a shareable permalink."""
+    slug = secrets.token_hex(4)  # 8-char random hex
+
+    # Build a self-contained HTML page
+    results_html = _build_results_html(req.results, req.backend)
+    analysis_html = _build_analysis_html(req.analysis, req.sources)
+
+    page = SHARE_TEMPLATE.format(
+        query=req.query,
+        mode=req.mode,
+        backend=req.backend,
+        results_html=results_html,
+        analysis_html=analysis_html,
+        slug=slug,
+    )
+
+    path = os.path.join(SHARED_DIR, f"{slug}.html")
+    with open(path, "w") as f:
+        f.write(page)
+
+    return ShareResponse(url=f"/share/{slug}", slug=slug)
+
+
+@app.get("/share/{slug}")
+def api_get_share(slug: str):
+    """Serve a previously shared permalink."""
+    # Sanitize slug to prevent path traversal
+    safe = ''.join(c for c in slug if c.isalnum())
+    if safe != slug:
+        raise HTTPException(status_code=404, detail="Not found")
+    path = os.path.join(SHARED_DIR, f"{safe}.html")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
+
+
 @app.get("/health")
 def health():
     vertex_store = get_vertex_store()
@@ -339,6 +401,184 @@ def health():
         "local_ready": local_store.has_vectors,
         "backend": backend,
     }
+
+
+# ── Share template & helpers ───────────────────────────────────────
+
+def _html_escape(s):
+    """Basic HTML entity escaping."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _build_results_html(results: list[dict], backend: str) -> str:
+    if not results:
+        return '<div class="status">No results</div>'
+    parts = []
+    for r in results:
+        title = _html_escape(r.get("title", "Heavenletter"))
+        excerpt = _html_escape(r.get("excerpt", ""))
+        score = r.get("_score", r.get("score", 0))
+        source = _html_escape(r.get("_source", ""))
+        meta = r.get("metadata", {})
+        pub_num = meta.get("publish_number", "")
+        permalink = meta.get("permalink", "")
+        url = f"https://heavenletters.org/{permalink}" if permalink else "#"
+
+        parts.append(f'''<div class="result">
+  <div class="result-header">
+    <span class="result-title"><a href="{_html_escape(url)}" target="_blank">{title}</a></span>
+    <span class="result-number">#{_html_escape(str(pub_num))}</span>
+  </div>
+  <div class="result-excerpt">{excerpt}</div>
+  <div class="result-meta">
+    <span>{source}</span>
+    <span>score: {score:.4f}</span>
+    <span>{_html_escape(backend)}</span>
+  </div>
+</div>''')
+    return "\n".join(parts)
+
+
+def _build_analysis_html(analysis: str, sources: list[dict]) -> str:
+    if not analysis:
+        return ""
+    parts = ['<div id="analyze-result">', '<h3>Analysis</h3>']
+    if sources:
+        src_links = []
+        for s in sources:
+            num = _html_escape(str(s.get("publish_number", "")))
+            title = _html_escape(s.get("title", ""))
+            permalink = s.get("permalink", "")
+            url = f"https://heavenletters.org/{permalink}" if permalink else "#"
+            src_links.append(
+                f'<span class="source-item"><a href="{_html_escape(url)}" target="_blank">'
+                f'Heavenletter #{num}: {title}</a></span>'
+            )
+        parts.append('<div class="source-list">Based on: ' + ", ".join(src_links) + "</div>")
+    # Wrap paragraphs for markdown-like text (basic rendering even without JS)
+    for line in analysis.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("###"):
+            parts.append(f"<h4>{_html_escape(line[3:].strip())}</h4>")
+        elif line.startswith("##"):
+            parts.append(f"<h3>{_html_escape(line[2:].strip())}</h3>")
+        elif line.startswith("#"):
+            parts.append(f"<h3>{_html_escape(line[1:].strip())}</h3>")
+        elif line.startswith("- ") or line.startswith("* "):
+            parts.append(f"<li>{_html_escape(line[2:])}</li>")
+        elif line.startswith("> "):
+            parts.append(f"<blockquote>{_html_escape(line[2:])}</blockquote>")
+        else:
+            # Bold markers
+            line = _html_escape(line)
+            line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+            parts.append(f"<p>{line}</p>")
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+SHARE_TEMPLATE = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Heavenletters: {query}</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f0eb; color: #2d2d2d; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }}
+  header {{
+    width: 100%; padding: 2rem 1rem 0; text-align: center;
+  }}
+  header h1 {{
+    font-size: 1.5rem; font-weight: 300; letter-spacing: 0.04em; color: #8b7355;
+  }}
+  header p {{ font-size: 0.8rem; color: #a89880; margin-top: 0.25rem; }}
+  main {{
+    width: 100%; max-width: 720px; padding: 1.5rem 1rem 3rem;
+  }}
+  .query-display {{
+    background: white; border-radius: 6px; padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }}
+  .query-display .q {{ font-size: 1.1rem; color: #5a4a3a; }}
+  .query-display .meta {{ font-size: 0.75rem; color: #aaa; margin-top: 0.35rem; }}
+  .result {{
+    background: white; border-radius: 6px; padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }}
+  .result-header {{
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 0.5rem;
+  }}
+  .result-title {{ font-size: 1.05rem; font-weight: 500; }}
+  .result-title a {{ color: #5a4a3a; text-decoration: none; }}
+  .result-title a:hover {{ text-decoration: underline; }}
+  .result-number {{ font-size: 0.8rem; color: #aaa; white-space: nowrap; }}
+  .result-excerpt {{
+    font-size: 0.9rem; line-height: 1.55; color: #555;
+  }}
+  .result-meta {{
+    display: flex; gap: 1rem; margin-top: 0.5rem;
+    font-size: 0.75rem; color: #bbb;
+  }}
+  .result-meta span {{
+    background: #f5f0eb; padding: 0.1rem 0.4rem; border-radius: 3px;
+  }}
+  #analyze-result {{
+    margin-top: 2rem; background: #faf8f5;
+    border-left: 3px solid #8b7355; padding: 1.25rem 1.5rem;
+    border-radius: 0 6px 6px 0; font-size: 0.9rem; line-height: 1.65;
+  }}
+  #analyze-result h3 {{
+    font-weight: 400; color: #8b7355; margin-bottom: 0.75rem; font-size: 0.95rem;
+  }}
+  #analyze-result h4 {{
+    font-weight: 500; margin: 0.75rem 0 0.35rem; font-size: 0.9rem;
+  }}
+  #analyze-result p {{ margin-bottom: 0.5rem; }}
+  #analyze-result strong {{ color: #5a4a3a; }}
+  #analyze-result blockquote {{
+    border-left: 2px solid #d5c8b5; padding-left: 0.75rem;
+    color: #777; margin: 0.5rem 0; font-style: italic;
+  }}
+  #analyze-result li {{ margin: 0.15rem 0 0.15rem 1.5rem; }}
+  .source-list {{
+    margin-bottom: 1rem; padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e8e0d5; font-size: 0.8rem; color: #8b7355;
+  }}
+  .source-item a {{ color: #8b7355; text-decoration: none; }}
+  .source-item a:hover {{ text-decoration: underline; }}
+  .status {{ text-align: center; color: #999; padding: 2rem 0; font-size: 0.9rem; }}
+  .footer {{
+    text-align: center; padding: 1rem; font-size: 0.7rem; color: #ccc;
+  }}
+  .footer a {{ color: #aaa; }}
+</style>
+</head>
+<body>
+<header>
+  <h1>Heavenletters Search</h1>
+  <p>Shared result</p>
+</header>
+<main>
+<div class="query-display">
+  <div class="q">"{query}"</div>
+  <div class="meta">{mode} &middot; {backend}</div>
+</div>
+{results_html}
+{analysis_html}
+</main>
+<div class="footer">
+  <a href="/">Search Heavenletters</a>
+</div>
+</body>
+</html>'''
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
