@@ -28,6 +28,18 @@ from .store import DEFAULT_EMBEDDING_DIM, DocStore
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+ANALYZE_MODEL = os.environ.get("ANALYZE_MODEL", "deepseek-v4-flash")
+ANALYZE_SYSTEM_PROMPT = os.environ.get(
+    "ANALYZE_SYSTEM_PROMPT",
+    (
+        "You are a research assistant analyzing a collection of Heavenletters — "
+        "spiritual channeled messages that explore themes of divine love, unity, "
+        "consciousness, and the human experience. "
+        "You answer questions based on the documents provided. "
+        "Be thorough, nuanced, and quote relevant passages. "
+        "If the documents don't address the question, say so honestly."
+    ),
+)
 
 # Dual stores: share the same SQLite DB, different .npy vector files
 _vertex_store: DocStore | None = None
@@ -134,7 +146,7 @@ class AnalyzeRequest(BaseModel):
     query: str
     instructions: str = "Analyze the following documents and answer the user's question."
     top_k: int = 5
-    model: str = "deepseek-v4-flash"
+    model: str = ANALYZE_MODEL
 
 
 class AnalyzeResponse(BaseModel):
@@ -267,14 +279,7 @@ def api_analyze(
 
     context = "\n".join(context_parts)
 
-    system_prompt = (
-        "You are a research assistant analyzing a collection of Heavenletters — "
-        "spiritual channeled messages that explore themes of divine love, unity, "
-        "consciousness, and the human experience. "
-        "You answer questions based on the documents provided. "
-        "Be thorough, nuanced, and quote relevant passages. "
-        "If the documents don't address the question, say so honestly."
-    )
+    system_prompt = ANALYZE_SYSTEM_PROMPT
 
     user_message = f"{req.instructions}\n\nUser question: {req.query}\n\nRelevant documents:\n\n{context}"
 
