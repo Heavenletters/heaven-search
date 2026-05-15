@@ -364,6 +364,25 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   #search-btn.loading { opacity: 0.7; pointer-events: none; }
+
+  /* ── Share Toast ───────────────────────────────────── */
+  .share-toast {
+    position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%);
+    background: var(--white); border: 1px solid var(--beige);
+    border-radius: 0.6rem; padding: 1.25rem 1.75rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+    z-index: 100; max-width: 500px; width: calc(100% - 3rem);
+    animation: toast-in 0.25s ease;
+  }
+  @keyframes toast-in {{ from {{ opacity: 0; transform: translateX(-50%) translateY(12px); }} }}
+  .share-toast .url {{
+    font-family: monospace; font-size: 0.85rem;
+    color: var(--ab-standard); word-break: break-all;
+    margin-bottom: 0.5rem;
+  }}
+  .share-toast .msg {{
+    font-size: 0.85rem; color: var(--charcoal); opacity: 0.7;
+  }}
 </style>
 </head>
 <body>
@@ -616,7 +635,6 @@ function toggleAnalyze() {}
 async function doShare() {
   if (!lastResults) return;
   const btn = document.getElementById('share-btn');
-  const orig = btn.textContent;
   btn.textContent = 'Sharing…';
   btn.style.opacity = '0.7';
 
@@ -637,13 +655,33 @@ async function doShare() {
     const d = await r.json();
     const url = window.location.origin + d.url;
     await navigator.clipboard.writeText(url);
-    btn.textContent = '✓ Copied!';
-    setTimeout(() => { btn.textContent = orig; btn.style.opacity = '1'; }, 2000);
+    showShareToast(url);
   } catch(e) {
-    btn.textContent = 'Failed';
+    btn.textContent = 'Share';
     btn.style.opacity = '1';
-    setTimeout(() => { btn.textContent = orig; }, 2000);
   }
+}
+
+function showShareToast(url) {
+  // Remove existing toast
+  const old = document.querySelector('.share-toast');
+  if (old) old.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'share-toast';
+  toast.innerHTML = '<div class="url">' + esc(url) + '</div><div class="msg">Link copied to clipboard</div>';
+  document.body.appendChild(toast);
+
+  const btn = document.getElementById('share-btn');
+  btn.textContent = '✓ Shared';
+  btn.style.opacity = '1';
+
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(() => toast.remove(), 300);
+    btn.textContent = 'Share';
+  }, 3500);
 }
 
 // ═══ Helpers ═══════════════════════════════════════════════════════

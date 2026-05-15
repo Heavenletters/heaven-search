@@ -492,13 +492,13 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   :root {{
     --cream: #f9f0d9; --white: #ffffff; --charcoal: #403f3e;
-    --ab-standard: #2e82f5; --ab-dark: #084eaf; --ab-light: #d8e8fd;
-    --mb-standard: #ED2960; --mb-dark: #bb1141; --mb-light: #f8b4c7;
+    --ab-standard: #2e82f5; --ab-light: #d8e8fd; --ab-dark: #084eaf;
+    --mb-standard: #ED2960; --mb-light: #f8b4c7; --mb-dark: #bb1141;
     --bl-standard: #FDE80F; --bl-light: #fef9c2; --beige: #b7b2a3;
   }}
   body {{
     font-family: 'Lexend', sans-serif;
-    background: var(--cream); color: var(--charcoal);
+    background-color: var(--cream); color: var(--charcoal);
     font-size: 1.125rem; line-height: 1.75; min-height: 100vh;
     display: flex; flex-direction: column; align-items: center;
   }}
@@ -507,32 +507,33 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
     width: 100%; padding: 3rem 1.5rem 0; text-align: center;
   }}
   header h1 {{
-    font-size: 2rem; font-weight: 600; letter-spacing: 0.02em; color: var(--mb-standard);
+    font-size: 2.4rem; font-weight: 600; letter-spacing: 0.02em; color: var(--mb-standard);
   }}
-  header p {{ font-size: 0.95rem; color: var(--charcoal); opacity: 0.6; margin-top: 0.35rem; }}
+  header p {{ font-size: 1.05rem; color: var(--charcoal); opacity: 0.7; margin-top: 0.35rem; }}
   main {{
     width: 100%; max-width: 760px; padding: 2rem 1.5rem 4rem;
   }}
   .query-display {{
     background: var(--white); border: 1px solid var(--beige);
-    border-radius: 0.6rem; padding: 1.5rem 1.75rem;
-    margin-bottom: 2rem;
+    border-radius: 0.6rem; padding: 1.5rem 1.75rem; margin-bottom: 2rem;
   }}
-  .query-display .q {{ font-family: 'EB Garamond', serif; font-size: 1.35rem; color: var(--charcoal); }}
-  .query-display .meta {{ font-size: 0.85rem; color: var(--beige); margin-top: 0.5rem; }}
+  .query-display .q {{ font-family: 'EB Garamond', serif; font-size: 1.5rem; color: var(--charcoal); font-weight: 600; }}
+  .query-display .meta {{ font-size: 0.95rem; color: var(--beige); margin-top: 0.5rem; }}
   .result {{
     background: var(--white); border: 1px solid var(--beige);
     border-radius: 0.6rem; padding: 1.5rem 1.75rem; margin-bottom: 1rem;
+    transition: box-shadow 0.15s;
   }}
+  .result:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
   .result-header {{
     display: flex; justify-content: space-between; align-items: baseline;
     margin-bottom: 0.6rem; gap: 1rem;
   }}
-  .result-title {{ font-family: 'EB Garamond', serif; font-size: 1.2rem; font-weight: 600; }}
+  .result-title {{ font-family: 'EB Garamond', serif; font-size: 1.25rem; font-weight: 600; }}
   .result-title a {{ color: var(--charcoal); text-decoration: none; }}
   .result-title a:hover {{ color: var(--mb-standard); }}
   .result-number {{ font-size: 0.9rem; color: var(--beige); white-space: nowrap; }}
-  .result-excerpt {{ font-size: 1rem; line-height: 1.7; opacity: 0.85; }}
+  .result-excerpt {{ font-size: 1rem; line-height: 1.7; color: var(--charcoal); opacity: 0.85; }}
   .result-meta {{
     display: flex; gap: 1rem; margin-top: 0.75rem;
     font-size: 0.8rem; color: var(--beige);
@@ -555,17 +556,20 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
     margin: 1.25rem 0 0.5rem; font-size: 1.15rem;
   }}
   #analyze-result p {{ margin-bottom: 0.65rem; }}
+  #analyze-result ul, #analyze-result ol {{ margin: 0.35rem 0 0.65rem 1.75rem; }}
+  #analyze-result li {{ margin-bottom: 0.3rem; }}
   #analyze-result strong {{ color: var(--ab-dark); font-weight: 600; }}
+  #analyze-result em {{ color: var(--charcoal); opacity: 0.8; }}
   #analyze-result blockquote {{
     border-left: 3px solid var(--bl-standard);
     padding-left: 1rem; opacity: 0.75; margin: 0.75rem 0;
     font-style: italic; font-family: 'EB Garamond', serif;
   }}
-  #analyze-result li {{ margin: 0.15rem 0 0.15rem 1.5rem; }}
   .source-list {{
     margin-bottom: 1.25rem; padding-bottom: 1rem;
     border-bottom: 1px solid var(--beige); font-size: 0.95rem; opacity: 0.75;
   }}
+  .source-item {{ margin-right: 0.5rem; }}
   .source-item a {{ color: var(--ab-standard); text-decoration: none; }}
   .source-item a:hover {{ text-decoration: underline; }}
   .status {{ text-align: center; opacity: 0.5; padding: 3rem 0; font-size: 1.05rem; }}
@@ -578,8 +582,8 @@ SHARE_TEMPLATE = '''<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>Heavenletters Search</h1>
-  <p>Shared result</p>
+  <h1>Heavenletters</h1>
+  <p>Shared Search Result</p>
 </header>
 <main>
 <div class="query-display">
