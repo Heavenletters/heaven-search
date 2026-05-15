@@ -82,10 +82,20 @@ class VertexEmbedder(Embedder):
             raise RuntimeError("VERTEX_PROJECT not set")
 
         all_embeddings: list[np.ndarray] = []
-        batch_size = min(batch_size, self.max_batch)
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
+        # Adaptive batching: text-embedding-004 has a 20,000 token limit per request.
+        # Estimate ~3.5 chars per token, keep batches under ~18K estimated tokens.
+        MAX_TOKENS_PER_BATCH = 18000
+        CHARS_PER_TOKEN = 3.5
+
+        i = 0
+        while i < len(texts):
+            batch: list[str] = []
+            est_tokens = 0
+            while i < len(texts) and est_tokens < MAX_TOKENS_PER_BATCH:
+                batch.append(texts[i])
+                est_tokens += len(texts[i]) / CHARS_PER_TOKEN
+                i += 1
             embeddings = self._embed_batch(batch)
             all_embeddings.append(embeddings)
 

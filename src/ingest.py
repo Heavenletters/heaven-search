@@ -125,7 +125,13 @@ def main():
     print(f"Backend: {backend} ({dim}-dim)")
     print(f"Vector file: {store.vec_path}")
     print(f"Database: {store.db_path}")
-    print(f"Documents before: {store.count()}\n")
+    print(f"Documents before: {store.count()}")
+
+    # Clear old vectors when re-ingesting — dimensions may have changed
+    if store.has_vectors:
+        store.clear_vectors()
+        print(f"Cleared old vectors from {store.vec_path.name}")
+    print()
 
     for path in paths:
         print(f"Processing: {path.name}")

@@ -76,7 +76,7 @@ class DocStore:
         self._legacy_path = self.data_dir / "embeddings.npy"
 
         # Auto-detect dimension from existing file (handles legacy migrations)
-        self.dim = self._detect_dim() or dim
+        self.dim = self._detect_dim(vec_suffix) or dim
 
         self._conn: sqlite3.Connection | None = None
         self._vectors: np.ndarray | None = None
@@ -136,13 +136,17 @@ class DocStore:
             or (self._legacy_path.exists() and self._legacy_path.stat().st_size > 0)
         )
 
-    def _detect_dim(self) -> int | None:
+    def _detect_dim(self, vec_suffix: str = "") -> int | None:
         """Detect embedding dimension from an existing .npy file.
 
-        Checks the configured vec_path first, then the legacy embeddings.npy.
+        Checks the configured vec_path first. For the 'local' suffix only,
+        falls back to the legacy embeddings.npy (384-dim MiniLM).
         Returns None if no file exists.
         """
-        for p in (self.vec_path, self._legacy_path):
+        paths = [self.vec_path]
+        if vec_suffix == "local":
+            paths.append(self._legacy_path)
+        for p in paths:
             if p.exists() and p.stat().st_size > 0:
                 try:
                     arr = np.load(p, mmap_mode="r")
@@ -179,26 +183,14 @@ class DocStore:
             ids.append(cur.lastrowid if cur.lastrowid else 0)
         self.conn.commit()
 
-        # For re-ingestion (INSERT OR IGNORE skips duplicates), rebuild the
-        # full vector matrix from scratch using the current row count.
-        # Embeddings are always a full re-ingestion, so just save the full array.
-        expected_count = self.count()
-        if len(embeddings) != expected_count:
-            # Partial ingestion — append to existing
-            existing = (
-                np.load(self.vec_path, mmap_mode="r")
-                if self.vec_path.exists()
-                else np.empty((0, self.dim), dtype=np.float32)
-            )
-            # Only append the new ones (last len(embeddings) - len(existing))
-            new_count = len(embeddings) - len(existing)
-            if new_count > 0:
-                combined = np.vstack([existing, embeddings[-new_count:]])
-            else:
-                combined = embeddings
-        else:
-            combined = embeddings
-
+        # Always append to existing vectors — for re-ingestion, the ingest
+        # script clears old vectors first, so we start fresh and accumulate.
+        existing = (
+            np.load(self.vec_path, mmap_mode="r")
+            if self.vec_path.exists() and self.vec_path.stat().st_size > 0
+            else np.empty((0, self.dim), dtype=np.float32)
+        )
+        combined = np.vstack([existing, embeddings]) if len(existing) > 0 else embeddings
         self.save_vectors(combined)
         return ids
 

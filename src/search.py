@@ -156,7 +156,7 @@ def semantic_search(
         score = float(scores[idx])
         if score < min_score:
             continue
-        doc = use_store.get_document(idx + 1)
+        doc = use_store.get_document(int(idx) + 1)  # internal IDs are 1-based; cast for SQLite
         if doc:
             doc["_score"] = round(score, 4)
             doc["_source"] = "semantic"

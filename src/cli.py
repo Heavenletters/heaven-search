@@ -13,6 +13,10 @@ import argparse
 import sys
 from pathlib import Path
 
+# Auto-load .env for CLI usage
+from dotenv import load_dotenv
+load_dotenv()
+
 from .embedder import AutoEmbedder, get_embedder
 from .search import hybrid_search, keyword_search, semantic_search
 from .store import DEFAULT_EMBEDDING_DIM, DocStore
