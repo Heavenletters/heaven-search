@@ -134,7 +134,7 @@ class AnalyzeRequest(BaseModel):
     query: str
     instructions: str = "Analyze the following documents and answer the user's question."
     top_k: int = 5
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-flash"
 
 
 class AnalyzeResponse(BaseModel):
@@ -235,7 +235,7 @@ def api_stats(_user: str = Depends(require_auth)):
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-async def api_analyze(
+def api_analyze(
     req: AnalyzeRequest,
     _user: str = Depends(require_auth),
 ):
@@ -278,8 +278,8 @@ async def api_analyze(
 
     user_message = f"{req.instructions}\n\nUser question: {req.query}\n\nRelevant documents:\n\n{context}"
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
+    with httpx.Client(timeout=120.0) as client:
+        resp = client.post(
             f"{DEEPSEEK_BASE_URL}/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
