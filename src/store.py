@@ -164,19 +164,46 @@ class DocStore:
 
     @staticmethod
     def _sanitize_fts5_query(query: str) -> str:
-        """Escape FTS5 special characters so arbitrary text works as a phrase query.
+        """Escape FTS5-breaking characters so arbitrary text works.
 
-        FTS5 has its own mini query language. Characters like . * " ( ) :
-        can cause syntax errors. Wrapping in double quotes treats the input
-        as a literal phrase, which is what users expect from keyword search.
+        FTS5 has its own mini query language. Characters like * " ( )
+        and trailing sentence punctuation can cause syntax errors.
+
+        If the query contains any dangerous characters, we wrap it in
+        double quotes (literal phrase). Otherwise we pass it through
+        as-is, preserving implicit-AND word matching for short queries
+        like "divine love" or "finding peace".
         """
-        # Escape internal double quotes by doubling them (SQLite convention)
+        stripped = query.strip()
+
+        # Characters that will break FTS5 query parsing
+        fts5_syntax_chars = {'*', '"', '(', ')'}
+
+        # Trailing sentence punctuation also breaks parsing
+        has_trailing_punct = stripped and stripped[-1] in '.!?,;:'
+
+        has_dangerous = any(c in query for c in fts5_syntax_chars)
+
+        if not has_dangerous and not has_trailing_punct:
+            # Safe — pass through for word-match behavior
+            return query
+
+        # Wrap in quotes for literal phrase matching
         escaped = query.replace('"', '""')
         return f'"{escaped}"'
 
-    def keyword_search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """FTS5 keyword search. Returns matching documents."""
-        safe_query = self._sanitize_fts5_query(query)
+    def keyword_search(self, query: str, limit: int = 20, force_phrase: bool = False) -> list[dict[str, Any]]:
+        """FTS5 keyword search. Returns matching documents.
+
+        If force_phrase is True, the query is always wrapped in quotes
+        for literal phrase matching (adjacency required). Otherwise,
+        quotes are only added when the query contains FTS5-breaking chars.
+        """
+        if force_phrase:
+            escaped = query.replace('"', '""')
+            safe_query = f'"{escaped}"'
+        else:
+            safe_query = self._sanitize_fts5_query(query)
         rows = self.conn.execute(
             """
             SELECT d.id, d.external_id, d.title, d.content, d.metadata, d.created_at,
