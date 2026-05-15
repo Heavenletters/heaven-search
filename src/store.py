@@ -231,7 +231,7 @@ class DocStore:
         stripped = query.strip()
 
         # Characters that will break FTS5 query parsing
-        fts5_syntax_chars = {'*', '"', '(', ')'}
+        fts5_syntax_chars = {'*', '"', '(', ')', "'"}
 
         # Trailing sentence punctuation also breaks parsing
         has_trailing_punct = stripped and stripped[-1] in '.!?,;:'
